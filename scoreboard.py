@@ -178,6 +178,14 @@ def fmt_mmss(s):
     r = s % 60
     return f"{m:02d}:{r:02d}"
 
+def fmt_mmss_centi(s):
+    """1/100초까지 표시하는 시간 포맷"""
+    s = max(0, s)
+    m = int(s) // 60
+    r = int(s) % 60
+    centi = int((s - int(s)) * 100)
+    return f"{m:02d}:{r:02d} {centi:02d}"
+
 def parse_args(cfg):
     ap = argparse.ArgumentParser(description="Offline Basketball Scoreboard")
     ap.add_argument("--teamA", type=str, help="Left team name")
@@ -232,6 +240,7 @@ def main():
     fontBig = load_font(int(H*0.167))    # ~180 (1.5배)
     fontSmall = load_font(int(H*0.033))  # ~36
     fontTimeout = load_font(int(H*0.060))  # ~65 (타임아웃 표시용)
+    fontCenti = load_font(int(H*0.084))  # ~90 (1/100초 표시용, 시간의 절반 크기)
 
     # 상태
     scoreA = 0
@@ -250,19 +259,39 @@ def main():
     pygame.mouse.set_visible(mouse_visible)
 
     # 사운드(선택)
-    buzzer_path = os.path.expanduser("~/.scoreboard_buzzer.wav")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    buzzer_main_path = os.path.join(script_dir, "sound", "buzzer_main.wav")
+    beep_path = os.path.join(script_dir, "sound", "beep.wav")
+    
     has_sound = False
-    if os.path.exists(buzzer_path):
+    buzzer_main = None
+    beep_sound = None
+    
+    if os.path.exists(buzzer_main_path):
         try:
             pygame.mixer.init()
-            buzzer = pygame.mixer.Sound(buzzer_path)
+            buzzer_main = pygame.mixer.Sound(buzzer_main_path)
             has_sound = True
         except Exception:
-            has_sound = False
+            pass
+    
+    if os.path.exists(beep_path):
+        try:
+            if not has_sound:
+                pygame.mixer.init()
+                has_sound = True
+            beep_sound = pygame.mixer.Sound(beep_path)
+        except Exception:
+            pass
 
     def beep():
-        if has_sound:
-            try: buzzer.play()
+        if has_sound and beep_sound:
+            try: beep_sound.play()
+            except Exception: pass
+    
+    def main_buzzer():
+        if has_sound and buzzer_main:
+            try: buzzer_main.play()
             except Exception: pass
 
     def reset_all():
@@ -282,16 +311,20 @@ def main():
         if hints_visible:
             # 힌트만 표시
             hints = [
-                "A/Z: A +1/-1 | K/M: B +1/-1 | 1/2/3: A +1/+2/+3 | 8/9/0: B +1/+2/+3",
-                "Space: Game ▶/⏸ | S: Shot ▶/⏸ | R: Reset | [ / ]: Q- / Q+",
-                "D: Shot 24s | F: Shot 14s | C/X: Shot +1/-1s | ; / ': Shot +5/-5s",
-                "T/Y: A/B Timeout-1 | V/G: A/B Timeout+1 | P: Fullscreen | M: Mouse | H: Hints | F2: Settings | Esc: Quit",
+                "점수 조작: A/Z(A팀 ±1점) | K/M(B팀 ±1점) | 1/2/3(A팀 +1/+2/+3점) | 8/9/0(B팀 +1/+2/+3점)",
+                "",
+                "시간 조작: 스페이스(게임시간 시작/정지) | R(전체 리셋) | [ / ](쿼터 감소/증가) | ←→(±1초) | ↑↓(±10초) | < >(±1분)",
+                "",
+                "샷클럭 조작: S(샷클럭 시작/정지) | D(24초 리셋) | F(14초 리셋) | C/X(±1초) | ; / '(±5초)",
+                "",
+                "기타: T/Y(A/B팀 타임아웃 -1) | V/G(A/B팀 타임아웃 +1) | P(전체화면) | M(마우스) | H(힌트) | F2(설정) | Esc(종료)",
             ]
-            # 힌트를 화면 중앙에 표시
-            start_y = H // 2 - len(hints) * int(H*0.03) // 2
+            # 힌트를 화면 중앙에 표시 (줄간격 개선)
+            line_height = int(H*0.05)  # 줄간격을 더 넓게 (5%)
+            start_y = H // 2 - len(hints) * line_height // 2
             for i, line in enumerate(hints):
                 surf = fontSmall.render(line, True, (200,200,200))
-                screen.blit(surf, (W//2 - surf.get_width()//2, start_y + i*int(H*0.03)))
+                screen.blit(surf, (W//2 - surf.get_width()//2, start_y + i*line_height))
         else:
             # 좌단: A팀 정보
             left_x = W // 6
@@ -315,8 +348,14 @@ def main():
 
             # 중단: 시간/쿼터/샷클락
             center_x = W // 2
-            t_str = fmt_mmss(game_seconds)
-            game_surf = fontBig.render(t_str, True, (255,255,255))
+            t_str = fmt_mmss_centi(game_seconds)
+            # 시간과 1/100초를 분리해서 렌더링
+            time_part = t_str.split(' ')[0]  # "09:00"
+            centi_part = t_str.split(' ')[1]  # "22"
+            # 마지막 10초부터 빨간색으로 변경
+            time_color = (255,80,80) if game_seconds <= 10 else (255,255,255)
+            game_surf = fontBig.render(time_part, True, time_color)
+            centi_surf = fontCenti.render(centi_part, True, time_color)
             prd_surf = fontBig.render(f"Q{period}", True, (200,200,200))
             shot_color = (255,80,80) if shot_seconds <= 5 else (255,215,0)
             shot_surf = fontBig.render(str(max(0,int(shot_seconds))), True, shot_color)
@@ -326,7 +365,12 @@ def main():
             time_y = (0 + center_y) // 2  # 시간 위치 (상단과 쿼터 중간)
             shot_y = (center_y + H) // 2  # 샷클락 위치 (쿼터와 하단 중간)
             
-            screen.blit(game_surf, (center_x - game_surf.get_width()//2, int(time_y - game_surf.get_height()//2)))
+            # 시간과 1/100초를 고정 위치에 표시 (해상도에 비례)
+            # 시간은 중앙에서 왼쪽으로, 1/100초는 중앙에서 오른쪽으로 고정
+            time_x = center_x - int(W * 0.015)  # 시간 고정 위치 (화면 너비의 15% 왼쪽)
+            centi_x = center_x + int(W * 0.16)  # 1/100초 고정 위치 (화면 너비의 8% 오른쪽)
+            screen.blit(game_surf, (time_x - game_surf.get_width()//2, int(time_y - game_surf.get_height()//2)))
+            screen.blit(centi_surf, (centi_x - centi_surf.get_width()//2, int(time_y - centi_surf.get_height()//2)))
             screen.blit(prd_surf, (center_x - prd_surf.get_width()//2, int(center_y - prd_surf.get_height()//2)))
             screen.blit(shot_surf, (center_x - shot_surf.get_width()//2, int(shot_y - shot_surf.get_height()//2)))
 
@@ -427,6 +471,18 @@ def main():
                     shot_seconds = max(0, shot_seconds - 5)
                 elif k == pygame.K_t and (mod & pygame.KMOD_CTRL):
                     swap_teams()
+                elif k == pygame.K_LEFT:
+                    game_seconds = max(0, game_seconds - 1)
+                elif k == pygame.K_RIGHT:
+                    game_seconds += 1
+                elif k == pygame.K_UP:
+                    game_seconds += 10
+                elif k == pygame.K_DOWN:
+                    game_seconds = max(0, game_seconds - 10)
+                elif k == pygame.K_COMMA:  # < 키
+                    game_seconds = max(0, game_seconds - 60)
+                elif k == pygame.K_PERIOD:  # > 키
+                    game_seconds += 60
                 elif k == pygame.K_F2:
                     # 설정 창 열기
                     pygame.quit()
@@ -456,19 +512,31 @@ def main():
                     fontBig = load_font(int(H*0.167))
                     fontSmall = load_font(int(H*0.033))
                     fontTimeout = load_font(int(H*0.060))
+                    fontCenti = load_font(int(H*0.084))
 
-        if running_game and game_seconds > 0:
+        if running_game:
             game_seconds -= dt
+            # 마지막 10초부터 경고음 (정수 초일 때만, 0초 포함)
+            if game_seconds <= 10 and int(game_seconds) != int(game_seconds + dt):
+                beep()
+            # 1/100초가 0이 되는 순간(0.01초 → 0.00초)에 부저 울림
             if game_seconds <= 0:
                 game_seconds = 0
-                running_game = False
-                beep()
+                running_game = False  # 타이머 멈춤
+                main_buzzer()  # 게임 종료 시 buzzer_main.wav 재생
         if running_shot and shot_seconds > 0:
             shot_seconds -= dt
-            if shot_seconds <= 0:
-                shot_seconds = 0
-                running_shot = False
+            # 마지막 5초부터 경고음 (정수 초일 때만, 0초는 제외)
+            if shot_seconds <= 5 and int(shot_seconds) > 0 and int(shot_seconds) != int(shot_seconds + dt):
                 beep()
+            # 화면에 0이 표시되는 순간(0.99에서 0.00으로 바뀌는 순간)에 부저 울림
+            if int(shot_seconds) == 0 and int(shot_seconds + dt) == 1:
+                shot_seconds = 0
+                running_shot = False  # 타이머 멈춤
+                main_buzzer()  # 샷클럭 종료 시 buzzer_main.wav 재생
+            elif shot_seconds <= 0:
+                shot_seconds = 0
+                running_shot = False  # 타이머 멈춤
 
         render()
         clock.tick(FPS)
