@@ -1,0 +1,10 @@
+# Supabase 설정
+APP_SUPABASE_URL=your_supabase_project_url_here
+APP_SUPABASE_ANON_KEY=your_supabase_anon_key_here
+
+# 예시:
+# APP_SUPABASE_URL=https://your-project-id.supabase.co
+# APP_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# 이 파일을 .env로 복사하고 실제 값으로 수정하세요:
+# cp env_example.txt .env

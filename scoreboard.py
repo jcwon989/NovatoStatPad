@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import sys, os, time, json, argparse
 import pygame
+from game_selection import show_game_selection
+from dotenv import load_dotenv
 
 # ===== 기본 설정 =====
 PERIOD_MAX_DEFAULT = 4
@@ -60,7 +62,8 @@ def show_exit_confirm_fullscreen(screen, font_large, font_medium):
     # 선택 옵션들
     options = [
         "Y - 예, 프로그램 종료",
-        "N - 아니오, 계속하기", 
+        "N - 아니오, 계속하기",
+        "M - 목록으로 돌아가기",
         "ESC - 취소"
     ]
     
@@ -71,6 +74,7 @@ def show_exit_confirm_fullscreen(screen, font_large, font_medium):
         screen.blit(option_text, option_rect)
     
     pygame.display.flip()
+
 
 def show_settings_window(cfg):
     """게임 설정 창을 표시하고 설정을 수정할 수 있게 함"""
@@ -240,6 +244,11 @@ def parse_args(cfg):
     return cfg
 
 def main():
+    # .env 로드 (APP_DEBUG 등)
+    try:
+        load_dotenv()
+    except Exception:
+        pass
     cfg = parse_args(load_cfg())
     save_cfg(cfg)  # 사용자가 준 옵션을 저장
 
@@ -255,7 +264,7 @@ def main():
     if not cfg["windowed"]:
         flags |= pygame.FULLSCREEN
     screen = pygame.display.set_mode((cfg["width"], cfg["height"]), flags)
-    pygame.display.set_caption("Basketball Scoreboard (Offline)")
+    pygame.display.set_caption("Basketball Scoreboard")
 
     W, H = screen.get_size()
     clock = pygame.time.Clock()
@@ -269,6 +278,27 @@ def main():
     fontSmall = load_font(int(H*0.033))  # ~36
     fontTimeout = load_font(int(H*0.060))  # ~65 (타임아웃 표시용)
     fontCenti = load_font(int(H*0.084))  # ~90 (1/100초 표시용, 시간의 절반 크기)
+
+    # 게임 선택 화면 표시
+    selected_game = show_game_selection(screen, fontBig, fontMedium, fontSmall)
+    if os.getenv("APP_DEBUG", "0").lower() in {"1", "true", "yes", "on"}:
+        if selected_game:
+            print(f"[scoreboard] selected_game id={selected_game.get('id')} team1='{selected_game.get('team1')}' team2='{selected_game.get('team2')}'")
+        else:
+            print("[scoreboard] no game selected (offline mode)")
+    
+    # 선택된 게임이 있으면 설정 업데이트
+    if selected_game:
+        cfg["teamA"] = selected_game.get("team1", cfg["teamA"])
+        cfg["teamB"] = selected_game.get("team2", cfg["teamB"])
+        # 게임 날짜 정보도 저장 (필요시 사용)
+        cfg["selected_game_id"] = selected_game.get("id")
+        save_cfg(cfg)
+        if os.getenv("APP_DEBUG", "0").lower() in {"1", "true", "yes", "on"}:
+            print(f"[scoreboard] applied teamA='{cfg['teamA']}', teamB='{cfg['teamB']}', game_id={cfg.get('selected_game_id')}")
+        # 화면 표시용 런타임 변수도 즉시 갱신
+        teamA_name = cfg["teamA"]
+        teamB_name = cfg["teamB"]
 
     # 상태
     scoreA = 0
@@ -442,6 +472,34 @@ def main():
                                     save_cfg(cfg)
                                     pygame.quit()
                                     sys.exit(0)
+                                elif confirm_event.key == pygame.K_m:
+                                    # 목록으로 돌아가기: 모든 상태 초기화 후 게임 선택 화면으로 이동
+                                    # 런타임 상태 초기화
+                                    scoreA = 0; scoreB = 0
+                                    period = 1
+                                    game_seconds = GAME_SECONDS_INIT
+                                    shot_seconds = SHOT_SECONDS_INIT
+                                    running_game = False
+                                    running_shot = False
+                                    last_beep_sec_game = None
+                                    last_beep_sec_shot = None
+                                    timeoutsA = TIMEOUTS_INIT
+                                    timeoutsB = TIMEOUTS_INIT
+                                    teamA_name = cfg["teamA"]
+                                    teamB_name = cfg["teamB"]
+                                    hints_visible = cfg.get("hints_visible", True)
+
+                                    waiting_for_confirm = False
+
+                                    # 게임 선택 화면 표시
+                                    selected_game2 = show_game_selection(screen, fontBig, fontMedium, fontSmall)
+                                    if selected_game2:
+                                        cfg["teamA"] = selected_game2.get("team1", cfg["teamA"])
+                                        cfg["teamB"] = selected_game2.get("team2", cfg["teamB"])
+                                        cfg["selected_game_id"] = selected_game2.get("id")
+                                        save_cfg(cfg)
+                                        teamA_name = cfg["teamA"]
+                                        teamB_name = cfg["teamB"]
                                 elif confirm_event.key == pygame.K_n or confirm_event.key == pygame.K_ESCAPE:
                                     waiting_for_confirm = False
                         
