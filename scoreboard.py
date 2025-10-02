@@ -370,7 +370,7 @@ def main():
             time_x = center_x - int(W * 0.015)  # 시간 고정 위치 (화면 너비의 15% 왼쪽)
             centi_x = center_x + int(W * 0.16)  # 1/100초 고정 위치 (화면 너비의 8% 오른쪽)
             screen.blit(game_surf, (time_x - game_surf.get_width()//2, int(time_y - game_surf.get_height()//2)))
-            screen.blit(centi_surf, (centi_x - centi_surf.get_width()//2, int(time_y - centi_surf.get_height()//2)))
+            screen.blit(centi_surf, (centi_x - centi_surf.get_width()//2, int(time_y - centi_surf.get_height()//3)))
             screen.blit(prd_surf, (center_x - prd_surf.get_width()//2, int(center_y - prd_surf.get_height()//2)))
             screen.blit(shot_surf, (center_x - shot_surf.get_width()//2, int(shot_y - shot_surf.get_height()//2)))
 
