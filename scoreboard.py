@@ -45,6 +45,33 @@ def save_cfg(cfg):
     except Exception:
         pass
 
+def show_exit_confirm_fullscreen(screen, font_large, font_medium):
+    """종료 확인 전체화면 표시 (hint 스타일)"""
+    W, H = screen.get_size()
+    
+    # 전체화면 배경
+    screen.fill((0, 0, 0))
+    
+    # 제목
+    title = font_large.render("프로그램을 종료하시겠습니까?", True, (255, 255, 255))
+    title_rect = title.get_rect(center=(W//2, H//2 - int(H*0.1)))
+    screen.blit(title, title_rect)
+    
+    # 선택 옵션들
+    options = [
+        "Y - 예, 프로그램 종료",
+        "N - 아니오, 계속하기", 
+        "ESC - 취소"
+    ]
+    
+    # 옵션들 표시
+    for i, option in enumerate(options):
+        option_text = font_medium.render(option, True, (200, 200, 200))
+        option_rect = option_text.get_rect(center=(W//2, H//2 + int(H*0.05) + i * int(H*0.08)))
+        screen.blit(option_text, option_rect)
+    
+    pygame.display.flip()
+
 def show_settings_window(cfg):
     """게임 설정 창을 표시하고 설정을 수정할 수 있게 함"""
     pygame.init()
@@ -238,6 +265,7 @@ def main():
     fontTeam = load_font(int(H*0.074))   # ~80 on 1080p
     fontScore = load_font(int(H*0.296))  # ~320
     fontBig = load_font(int(H*0.167))    # ~180 (1.5배)
+    fontMedium = load_font(int(H*0.084))    # ~180 (1.5배)
     fontSmall = load_font(int(H*0.033))  # ~36
     fontTimeout = load_font(int(H*0.060))  # ~65 (타임아웃 표시용)
     fontCenti = load_font(int(H*0.084))  # ~90 (1/100초 표시용, 시간의 절반 크기)
@@ -398,7 +426,27 @@ def main():
                 mod = pygame.key.get_mods()
 
                 if k == pygame.K_ESCAPE:
-                    save_cfg(cfg); pygame.quit(); sys.exit(0)
+                    # 종료 확인 전체화면 표시
+                    show_exit_confirm_fullscreen(screen, fontMedium, fontSmall)
+                    
+                    # 사용자 입력 대기
+                    waiting_for_confirm = True
+                    while waiting_for_confirm:
+                        for confirm_event in pygame.event.get():
+                            if confirm_event.type == pygame.QUIT:
+                                save_cfg(cfg)
+                                pygame.quit()
+                                sys.exit(0)
+                            elif confirm_event.type == pygame.KEYDOWN:
+                                if confirm_event.key == pygame.K_y or confirm_event.key == pygame.K_RETURN:
+                                    save_cfg(cfg)
+                                    pygame.quit()
+                                    sys.exit(0)
+                                elif confirm_event.key == pygame.K_n or confirm_event.key == pygame.K_ESCAPE:
+                                    waiting_for_confirm = False
+                        
+                        # 깜빡임 방지를 위해 화면을 다시 그리지 않음
+                        clock.tick(60)  # CPU 사용량 조절만
                 elif k == pygame.K_p:
                     cfg["windowed"] = not cfg["windowed"]
                     save_cfg(cfg)
@@ -510,6 +558,7 @@ def main():
                     fontTeam = load_font(int(H*0.074))
                     fontScore = load_font(int(H*0.296))
                     fontBig = load_font(int(H*0.167))
+                    fontMedium = load_font(int(H*0.084))
                     fontSmall = load_font(int(H*0.033))
                     fontTimeout = load_font(int(H*0.060))
                     fontCenti = load_font(int(H*0.084))
