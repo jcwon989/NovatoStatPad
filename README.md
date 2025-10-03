@@ -6,8 +6,8 @@ python3 scoreboard.py
 ```
 
 ## 주요 단축키
-- A/Z : TEAM A +1 / -1
-- K/M : TEAM B +1 / -1
+- A/` : TEAM A +1 / -1
+- K/- : TEAM B +1 / -1
 - 1/2/3 : TEAM A +1/+2/+3
 - 8/9/0 : TEAM B +1/+2/+3
 - Space : 게임 시계 ▶ / ⏸
@@ -18,7 +18,7 @@ python3 scoreboard.py
 - ; / ' : 샷클락 +5/-5s
 - T/Y : TEAM A/B 타임아웃 -1
 - F/G : TEAM A/B 타임아웃 +1
-- H : 마우스 숨김/표시
+- J : 마우스 숨김/표시
 - Ctrl+T : 팀 교체
 - F11 : 전체화면 ↔ 창모드
 - Esc : 종료

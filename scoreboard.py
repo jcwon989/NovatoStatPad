@@ -315,6 +315,8 @@ def main():
     mouse_visible = False
     hints_visible = cfg.get("hints_visible", True)
     pygame.mouse.set_visible(mouse_visible)
+    # 한글 입력 경고 타임스탬프 초기화
+    last_korean_warning_at = None
 
     # 사운드(선택)
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -352,6 +354,14 @@ def main():
             try: buzzer_main.play()
             except Exception: pass
 
+    def is_korean_char(ch):
+        code = ord(ch)
+        return (
+            0xAC00 <= code <= 0xD7A3  # Hangul Syllables
+            or 0x1100 <= code <= 0x11FF  # Hangul Jamo
+            or 0x3130 <= code <= 0x318F  # Hangul Compatibility Jamo
+        )
+
     def reset_all():
         nonlocal scoreA, scoreB, period, timeoutsA, timeoutsB
         nonlocal game_seconds, shot_seconds, running_game, running_shot
@@ -369,13 +379,13 @@ def main():
         if hints_visible:
             # 힌트만 표시
             hints = [
-                "점수 조작: A/Z(A팀 ±1점) | K/M(B팀 ±1점) | 1/2/3(A팀 +1/+2/+3점) | 8/9/0(B팀 +1/+2/+3점)",
+                "점수 조작: A/`(A팀 +1/-1점) | K/-(B팀 +1/-1점) | 1/2/3(A팀 +1/+2/+3점) | 8/9/0(B팀 +1/+2/+3점)",
                 "",
                 "시간 조작: 스페이스(게임시간 시작/정지) | R(전체 리셋) | [ / ](쿼터 감소/증가) | ←→(±1초) | ↑↓(±10초) | < >(±1분)",
                 "",
                 "샷클럭 조작: S(샷클럭 시작/정지) | D(24초 리셋) | F(14초 리셋) | C/X(±1초) | ; / '(±5초)",
                 "",
-                "기타: T/Y(A/B팀 타임아웃 -1) | V/G(A/B팀 타임아웃 +1) | P(전체화면) | M(마우스) | H(힌트) | F2(설정) | Esc(종료)",
+                "기타: T/Y(A/B팀 타임아웃 -1) | V/G(A/B팀 타임아웃 +1) | P(전체화면) | J(마우스) | H(힌트) | F2(설정) | Esc(종료)",
             ]
             # 힌트를 화면 중앙에 표시 (줄간격 개선)
             line_height = int(H*0.05)  # 줄간격을 더 넓게 (5%)
@@ -432,6 +442,12 @@ def main():
             screen.blit(prd_surf, (center_x - prd_surf.get_width()//2, int(center_y - prd_surf.get_height()//2)))
             screen.blit(shot_surf, (center_x - shot_surf.get_width()//2, int(shot_y - shot_surf.get_height()//2)))
 
+        # 한글 입력 경고 오버레이 (상단 중앙, 노란색)
+        if last_korean_warning_at is not None and (time.perf_counter() - last_korean_warning_at) < 3.0:
+            warn_text = "입력 언어가 한글입니다. 영어(EN)로 전환하세요."
+            warn_surf = fontSmall.render(warn_text, True, (255, 215, 0))
+            screen.blit(warn_surf, (W//2 - warn_surf.get_width()//2, int(H*0.03)))
+
         pygame.display.flip()
 
     def swap_teams():
@@ -454,6 +470,17 @@ def main():
             if e.type == pygame.KEYDOWN:
                 k = e.key
                 mod = pygame.key.get_mods()
+
+                # 한글 입력 감지 → 경고 표시 타임스탬프 갱신
+                try:
+                    ch = e.unicode
+                except Exception:
+                    ch = ""
+                if ch:
+                    for _c in ch:
+                        if is_korean_char(_c):
+                            last_korean_warning_at = time.perf_counter()
+                            break
 
                 if k == pygame.K_ESCAPE:
                     # 종료 확인 전체화면 표시
@@ -524,11 +551,11 @@ def main():
                     period = min(PERIOD_MAX, period + 1)
                 elif k == pygame.K_a:
                     scoreA += 1
-                elif k == pygame.K_z:
+                elif k == pygame.K_BACKQUOTE:
                     scoreA = max(0, scoreA - 1)
                 elif k == pygame.K_k:
                     scoreB += 1
-                elif k == pygame.K_m:
+                elif k == pygame.K_MINUS:
                     scoreB = max(0, scoreB - 1)
                 elif k == pygame.K_1:
                     scoreA += 1
@@ -550,7 +577,7 @@ def main():
                     timeoutsA += 1
                 elif k == pygame.K_g:
                     timeoutsB += 1
-                elif k == pygame.K_m:
+                elif k == pygame.K_j:
                     mouse_visible = not pygame.mouse.get_visible()
                     pygame.mouse.set_visible(mouse_visible)
                 elif k == pygame.K_h:
