@@ -42,6 +42,11 @@ def load_cfg():
 
 def save_cfg(cfg):
     try:
+        # 디렉토리 존재 확인
+        config_dir = os.path.dirname(CONFIG_PATH)
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir, exist_ok=True)
+        
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
     except Exception:
@@ -78,9 +83,16 @@ def show_exit_confirm_fullscreen(screen, font_large, font_medium):
 
 def show_settings_window(cfg):
     """게임 설정 창을 표시하고 설정을 수정할 수 있게 함"""
-    pygame.init()
+    # 기존 화면 정보 백업
+    original_size = pygame.display.get_surface().get_size()
+    original_caption = pygame.display.get_caption()
+    
+    # 설정 창 화면으로 전환
     settings_screen = pygame.display.set_mode((800, 600))
     pygame.display.set_caption("게임 설정")
+    
+    # 설정이 변경되었는지 추적
+    settings_changed = False
     
     # 폰트 설정
     font_large = load_font(32)
@@ -115,12 +127,16 @@ def show_settings_window(cfg):
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                return cfg
+                # 원래 화면으로 복원
+                pygame.display.set_mode(original_size)
+                pygame.display.set_caption(original_caption[0])
+                return cfg, False  # 설정 변경 없음
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    pygame.quit()
-                    return cfg
+                    # 원래 화면으로 복원
+                    pygame.display.set_mode(original_size)
+                    pygame.display.set_caption(original_caption[0])
+                    return cfg, False  # 설정 변경 없음
                 elif event.key == pygame.K_RETURN:
                     # 설정 저장
                     try:
@@ -132,8 +148,10 @@ def show_settings_window(cfg):
                         cfg["period_max"] = int(settings["period_max"])
                         cfg["timeouts_per_team"] = int(settings["timeouts_per_team"])
                         save_cfg(cfg)
-                        pygame.quit()
-                        return cfg
+                        # 원래 화면으로 복원
+                        pygame.display.set_mode(original_size)
+                        pygame.display.set_caption(original_caption[0])
+                        return cfg, True  # 설정 변경됨
                     except ValueError:
                         pass  # 잘못된 입력 무시
                 elif event.key == pygame.K_TAB:
@@ -200,7 +218,10 @@ def show_settings_window(cfg):
 def load_font(size):
     for p in FONT_CANDIDATES:
         if os.path.exists(p):
-            return pygame.font.Font(p, size)
+            try:
+                return pygame.font.Font(p, size)
+            except Exception:
+                continue
     return pygame.font.SysFont(None, size)
 
 def fmt_mmss(s):
@@ -631,36 +652,25 @@ def main():
                 elif k == pygame.K_PERIOD:  # > 키
                     game_seconds += 60
                 elif k == pygame.K_F2:
-                    # 설정 창 열기
-                    pygame.quit()
-                    cfg = show_settings_window(cfg)
-                    # 설정이 변경되었을 수 있으므로 변수들 업데이트
-                    teamA_name = cfg["teamA"]
-                    teamB_name = cfg["teamB"]
-                    PERIOD_MAX = cfg["period_max"]
-                    GAME_SECONDS_INIT = cfg["game_seconds"]
-                    SHOT_SECONDS_INIT = cfg["shot_seconds"]
-                    TIMEOUTS_INIT = cfg.get("timeouts_per_team", 3)
-                    # 현재 타임아웃 수도 새로운 설정값으로 업데이트
-                    timeoutsA = TIMEOUTS_INIT
-                    timeoutsB = TIMEOUTS_INIT
-                    # 현재 게임 시간도 새로운 설정값으로 업데이트
-                    game_seconds = GAME_SECONDS_INIT
-                    # pygame 재초기화
-                    pygame.init()
-                    flags = 0
-                    if not cfg["windowed"]:
-                        flags |= pygame.FULLSCREEN
-                    screen = pygame.display.set_mode((cfg["width"], cfg["height"]), flags)
-                    pygame.display.set_caption("Basketball Scoreboard (Offline)")
-                    # 폰트 재로드
-                    fontTeam = load_font(int(H*0.074))
-                    fontScore = load_font(int(H*0.296))
-                    fontBig = load_font(int(H*0.167))
-                    fontMedium = load_font(int(H*0.084))
-                    fontSmall = load_font(int(H*0.033))
-                    fontTimeout = load_font(int(H*0.060))
-                    fontCenti = load_font(int(H*0.084))
+                    # 설정 창 열기 (단순 화면 전환)
+                    result = show_settings_window(cfg)
+                    if isinstance(result, tuple):
+                        cfg, settings_changed = result
+                    else:
+                        cfg = result
+                        settings_changed = True
+                    
+                    # 설정이 변경된 경우에만 변수 업데이트
+                    if settings_changed:
+                        teamA_name = cfg["teamA"]
+                        teamB_name = cfg["teamB"]
+                        PERIOD_MAX = cfg["period_max"]
+                        GAME_SECONDS_INIT = cfg["game_seconds"]
+                        SHOT_SECONDS_INIT = cfg["shot_seconds"]
+                        TIMEOUTS_INIT = cfg.get("timeouts_per_team", 3)
+                        timeoutsA = TIMEOUTS_INIT
+                        timeoutsB = TIMEOUTS_INIT
+                        game_seconds = GAME_SECONDS_INIT
 
         if running_game:
             game_seconds -= dt
