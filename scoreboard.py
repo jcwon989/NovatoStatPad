@@ -306,6 +306,8 @@ def main():
     period = 1
     timeoutsA = TIMEOUTS_INIT
     timeoutsB = TIMEOUTS_INIT
+    foulsA = 0  # A팀 파울 수
+    foulsB = 0  # B팀 파울 수
     running_game = False
     running_shot = False
     game_seconds = GAME_SECONDS_INIT
@@ -363,11 +365,12 @@ def main():
         )
 
     def reset_all():
-        nonlocal scoreA, scoreB, period, timeoutsA, timeoutsB
+        nonlocal scoreA, scoreB, period, timeoutsA, timeoutsB, foulsA, foulsB
         nonlocal game_seconds, shot_seconds, running_game, running_shot
         scoreA = scoreB = 0
         period = 1
         timeoutsA = timeoutsB = TIMEOUTS_INIT
+        foulsA = foulsB = 0
         game_seconds = GAME_SECONDS_INIT
         shot_seconds = SHOT_SECONDS_INIT
         running_game = False
@@ -379,13 +382,17 @@ def main():
         if hints_visible:
             # 힌트만 표시
             hints = [
-                "점수 조작: A/`(A팀 +1/-1점) | K/-(B팀 +1/-1점) | 1/2/3(A팀 +1/+2/+3점) | 8/9/0(B팀 +1/+2/+3점)",
+                "점수 조작: 1/2/3(A팀 +1/+2/+3점) | `(A팀 -1점) | 0/9/8(B팀 +1/+2/+3점) | -(B팀 -1점)",
                 "",
-                "시간 조작: 스페이스(게임시간 시작/정지) | R(전체 리셋) | [ / ](쿼터 감소/증가) | ←→(±1초) | ↑↓(±10초) | < >(±1분)",
+                "시간 조작: 스페이스(게임시간 시작/정지) | ←→(±1초) | ↑↓(±10초) | < >(±1분)",
                 "",
-                "샷클럭 조작: S(샷클럭 시작/정지) | D(24초 리셋) | F(14초 리셋) | C/X(±1초) | ; / '(±5초)",
+                "샷클럭 조작: S(샷클럭 시작/정지) | D(24초 리셋) | F(14초 리셋) | C/V(±1초)",
                 "",
-                "기타: T/Y(A/B팀 타임아웃 -1) | V/G(A/B팀 타임아웃 +1) | P(전체화면) | J(마우스) | H(힌트) | F2(설정) | Esc(종료)",
+                "게임 :  R(전체 리셋) | [ / ](쿼터 감소/증가)", 
+                "",
+                "기타: Q/W(A팀 타임아웃 ±1) | Z/X(A A팀 파울 ±1) | O/P(B팀 타임아웃 ±1) | N/M(A/B팀 파울 ±1)",
+                "",
+                "환경: G(전체화면) | J(마우스) | H(힌트) | F2(설정) | Esc(종료)",
             ]
             # 힌트를 화면 중앙에 표시 (줄간격 개선)
             line_height = int(H*0.05)  # 줄간격을 더 넓게 (5%)
@@ -399,20 +406,24 @@ def main():
             teamA = fontTeam.render(teamA_name, True, (220,220,220))
             scoreA_surf = fontScore.render(str(scoreA), True, (255,255,255))
             timeoutA_surf = fontTimeout.render(f"Timeouts: {timeoutsA}", True, (180,180,220))
+            foulA_surf = fontTimeout.render(f"Fouls: {foulsA}", True, (220,180,180))
             
             screen.blit(teamA, (left_x - teamA.get_width()//2, int(H*0.2)))
             screen.blit(scoreA_surf, (left_x - scoreA_surf.get_width()//2, int(H*0.35)))
             screen.blit(timeoutA_surf, (left_x - timeoutA_surf.get_width()//2, int(H*0.75)))
+            screen.blit(foulA_surf, (left_x - foulA_surf.get_width()//2, int(H*0.85)))
 
             # 우단: B팀 정보
             right_x = W * 5 // 6
             teamB = fontTeam.render(teamB_name, True, (220,220,220))
             scoreB_surf = fontScore.render(str(scoreB), True, (255,255,255))
             timeoutB_surf = fontTimeout.render(f"Timeouts: {timeoutsB}", True, (220,180,180))
+            foulB_surf = fontTimeout.render(f"Fouls: {foulsB}", True, (180,180,220))
             
             screen.blit(teamB, (right_x - teamB.get_width()//2, int(H*0.2)))
             screen.blit(scoreB_surf, (right_x - scoreB_surf.get_width()//2, int(H*0.35)))
             screen.blit(timeoutB_surf, (right_x - timeoutB_surf.get_width()//2, int(H*0.75)))
+            screen.blit(foulB_surf, (right_x - foulB_surf.get_width()//2, int(H*0.85)))
 
             # 중단: 시간/쿼터/샷클락
             center_x = W // 2
@@ -451,10 +462,11 @@ def main():
         pygame.display.flip()
 
     def swap_teams():
-        nonlocal teamA_name, teamB_name, scoreA, scoreB, timeoutsA, timeoutsB
+        nonlocal teamA_name, teamB_name, scoreA, scoreB, timeoutsA, timeoutsB, foulsA, foulsB
         teamA_name, teamB_name = teamB_name, teamA_name
         scoreA, scoreB = scoreB, scoreA
         timeoutsA, timeoutsB = timeoutsB, timeoutsA
+        foulsA, foulsB = foulsB, foulsA
 
     reset_all()
     render()
@@ -512,6 +524,8 @@ def main():
                                     last_beep_sec_shot = None
                                     timeoutsA = TIMEOUTS_INIT
                                     timeoutsB = TIMEOUTS_INIT
+                                    foulsA = 0
+                                    foulsB = 0
                                     teamA_name = cfg["teamA"]
                                     teamB_name = cfg["teamB"]
                                     hints_visible = cfg.get("hints_visible", True)
@@ -532,7 +546,7 @@ def main():
                         
                         # 깜빡임 방지를 위해 화면을 다시 그리지 않음
                         clock.tick(60)  # CPU 사용량 조절만
-                elif k == pygame.K_p:
+                elif k == pygame.K_g:
                     cfg["windowed"] = not cfg["windowed"]
                     save_cfg(cfg)
                     if cfg["windowed"]:
@@ -549,12 +563,8 @@ def main():
                     period = max(1, period - 1)
                 elif k == pygame.K_RIGHTBRACKET:
                     period = min(PERIOD_MAX, period + 1)
-                elif k == pygame.K_a:
-                    scoreA += 1
                 elif k == pygame.K_BACKQUOTE:
                     scoreA = max(0, scoreA - 1)
-                elif k == pygame.K_k:
-                    scoreB += 1
                 elif k == pygame.K_MINUS:
                     scoreB = max(0, scoreB - 1)
                 elif k == pygame.K_1:
@@ -563,20 +573,28 @@ def main():
                     scoreA += 2
                 elif k == pygame.K_3:
                     scoreA += 3
-                elif k == pygame.K_8:
+                elif k == pygame.K_0:
                     scoreB += 1
                 elif k == pygame.K_9:
                     scoreB += 2
-                elif k == pygame.K_0:
+                elif k == pygame.K_8:
                     scoreB += 3
-                elif k == pygame.K_t:
+                elif k == pygame.K_q:
                     timeoutsA = max(0, timeoutsA - 1)
-                elif k == pygame.K_y:
-                    timeoutsB = max(0, timeoutsB - 1)
-                elif k == pygame.K_v:
+                elif k == pygame.K_w:
                     timeoutsA += 1
-                elif k == pygame.K_g:
+                elif k == pygame.K_z:
+                    foulsA = max(0, foulsA - 1)
+                elif k == pygame.K_x:
+                    foulsA += 1
+                elif k == pygame.K_o:
+                    timeoutsB = max(0, timeoutsB - 1)
+                elif k == pygame.K_p:
                     timeoutsB += 1
+                elif k == pygame.K_n:
+                    foulsB = max(0, foulsB - 1)
+                elif k == pygame.K_m:
+                    foulsB += 1
                 elif k == pygame.K_j:
                     mouse_visible = not pygame.mouse.get_visible()
                     pygame.mouse.set_visible(mouse_visible)
@@ -592,16 +610,12 @@ def main():
                     running_shot = False
                 elif k == pygame.K_c:
                     shot_seconds += 1
-                elif k == pygame.K_x:
+                elif k == pygame.K_v:
                     shot_seconds = max(0, shot_seconds - 1)
                 elif k == pygame.K_PAGEUP:
                     game_seconds += 60
                 elif k == pygame.K_PAGEDOWN:
                     game_seconds = max(0, game_seconds - 60)
-                elif k == pygame.K_SEMICOLON:
-                    shot_seconds += 5
-                elif k == pygame.K_QUOTE:
-                    shot_seconds = max(0, shot_seconds - 5)
                 elif k == pygame.K_t and (mod & pygame.KMOD_CTRL):
                     swap_teams()
                 elif k == pygame.K_LEFT:
