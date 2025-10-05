@@ -37,6 +37,8 @@ def load_cfg():
         "game_minutes": 9,  # 게임 시간 (분)
         "timeout_count": 3,  # 타임아웃 갯수
         "overtime_minutes": 5,  # 연장전 시간 (분)
+        "team_a_color": "white",  # A팀 컬러
+        "team_b_color": "lightblue",  # B팀 컬러
     }
 
 def save_cfg(cfg):
@@ -137,12 +139,13 @@ class DualMonitorScoreboard:
         self.font_score = font.Font(family="Arial", size=int(72 * font_ratio), weight="bold")
         self.font_time = font.Font(family="Arial", size=int(36 * font_ratio), weight="bold")
         
-        # 프레젠테이션용 폰트 (큰 화면용)
-        self.pres_font_team = font.Font(family="Arial", size=int(60 * font_ratio), weight="bold")
-        self.pres_font_score = font.Font(family="Arial", size=int(200 * font_ratio), weight="bold")
-        self.pres_font_time = font.Font(family="Arial", size=int(80 * font_ratio), weight="bold")
-        self.pres_font_shot = font.Font(family="Arial", size=int(100 * font_ratio), weight="bold")
-        self.pres_font_period = font.Font(family="Arial", size=int(60 * font_ratio), weight="bold")
+        # 프레젠테이션용 폰트 (큰 화면용, 75% 크기)
+        self.pres_font_team = font.Font(family="Arial", size=int(90 * font_ratio), weight="bold")  # 120 → 90
+        self.pres_font_score = font.Font(family="Arial", size=int(300 * font_ratio), weight="bold")  # 400 → 300
+        self.pres_font_time = font.Font(family="Arial", size=int(120 * font_ratio), weight="bold")  # 160 → 120
+        self.pres_font_shot = font.Font(family="Arial", size=int(150 * font_ratio), weight="bold")  # 200 → 150
+        self.pres_font_period = font.Font(family="Arial", size=int(90 * font_ratio), weight="bold")  # 120 → 90
+        self.pres_font_stats = font.Font(family="Arial", size=int(60 * font_ratio), weight="bold")  # 80 → 60
     
     def create_control_window(self):
         """조작용 창 생성 (모니터 전환 기능 포함)"""
@@ -442,24 +445,33 @@ class DualMonitorScoreboard:
         main_frame = tk.Frame(self.presentation_window, bg='#111111')
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 중앙정렬을 위한 컨테이너 프레임
-        center_container = tk.Frame(main_frame, bg='#111111')
-        center_container.pack(expand=True, fill=tk.BOTH)
+        # 세로 중앙정렬을 위한 상하 여백 프레임
+        top_spacer = tk.Frame(main_frame, bg='#111111')
+        top_spacer.pack(fill=tk.BOTH, expand=True)
         
-        # 팀 순서가 바뀌었는지 확인
+        # 메인 콘텐츠 프레임 (중앙에 배치)
+        content_frame = tk.Frame(main_frame, bg='#111111')
+        content_frame.pack(fill=tk.X, pady=50)
+        
+        bottom_spacer = tk.Frame(main_frame, bg='#111111')
+        bottom_spacer.pack(fill=tk.BOTH, expand=True)
+        
+        # 팀 순서와 컬러 설정
         is_swapped = self.cfg.get("team_swapped", False)
+        team_a_color = self.cfg.get("team_a_color", "white")
+        team_b_color = self.cfg.get("team_b_color", "lightblue")
         
         if is_swapped:
             # 팀 순서가 바뀐 경우: B팀이 왼쪽, A팀이 오른쪽
-            self.create_team_display(center_container, self.teamB_name, self.teamA_name, 
-                                   'lightcoral', 'lightblue', True)
+            self.create_team_display(content_frame, self.teamB_name, self.teamA_name, 
+                                   team_b_color, team_a_color, True)
         else:
             # 기본 순서: A팀이 왼쪽, B팀이 오른쪽
-            self.create_team_display(center_container, self.teamA_name, self.teamB_name, 
-                                   'lightblue', 'lightcoral', False)
+            self.create_team_display(content_frame, self.teamA_name, self.teamB_name, 
+                                   team_a_color, team_b_color, False)
         
         # 중앙 시간 표시
-        self.create_time_display(center_container)
+        self.create_time_display(content_frame)
     
     def create_team_display(self, parent, left_team, right_team, left_color, right_color, swapped):
         """팀 표시 영역 생성"""
@@ -476,12 +488,48 @@ class DualMonitorScoreboard:
             self.pres_score_b_label = tk.Label(left_frame, text=str(self.scoreB), 
                                              font=self.pres_font_score, 
                                              fg='white', bg='#111111')
-            self.pres_score_b_label.pack(pady=(0, 50))
+            self.pres_score_b_label.pack(pady=(0, 20))
+            
+            # B팀 타임아웃/파울 표시
+            stats_b_frame = tk.Frame(left_frame, bg='#111111')
+            stats_b_frame.pack(pady=10)
+            
+            tk.Label(stats_b_frame, text="TO", font=self.pres_font_stats, 
+                    fg=right_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+            self.pres_timeout_b_label = tk.Label(stats_b_frame, text=str(self.timeoutsB), 
+                                               font=self.pres_font_stats, 
+                                               fg=right_color, bg='#111111')
+            self.pres_timeout_b_label.pack(side=tk.LEFT, padx=10)
+            
+            tk.Label(stats_b_frame, text="F", font=self.pres_font_stats, 
+                    fg=right_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+            self.pres_foul_b_label = tk.Label(stats_b_frame, text=str(self.foulsB), 
+                                            font=self.pres_font_stats, 
+                                            fg=right_color, bg='#111111')
+            self.pres_foul_b_label.pack(side=tk.LEFT)
         else:
             self.pres_score_a_label = tk.Label(left_frame, text=str(self.scoreA), 
                                              font=self.pres_font_score, 
                                              fg='white', bg='#111111')
-            self.pres_score_a_label.pack(pady=(0, 50))
+            self.pres_score_a_label.pack(pady=(0, 20))
+            
+            # A팀 타임아웃/파울 표시
+            stats_a_frame = tk.Frame(left_frame, bg='#111111')
+            stats_a_frame.pack(pady=10)
+            
+            tk.Label(stats_a_frame, text="TO", font=self.pres_font_stats, 
+                    fg=left_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+            self.pres_timeout_a_label = tk.Label(stats_a_frame, text=str(self.timeoutsA), 
+                                               font=self.pres_font_stats, 
+                                               fg=left_color, bg='#111111')
+            self.pres_timeout_a_label.pack(side=tk.LEFT, padx=10)
+            
+            tk.Label(stats_a_frame, text="F", font=self.pres_font_stats, 
+                    fg=left_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+            self.pres_foul_a_label = tk.Label(stats_a_frame, text=str(self.foulsA), 
+                                            font=self.pres_font_stats, 
+                                            fg=left_color, bg='#111111')
+            self.pres_foul_a_label.pack(side=tk.LEFT)
         
         # 오른쪽 팀 (B팀 또는 A팀)
         right_frame = tk.Frame(parent, bg='#111111')
@@ -496,12 +544,48 @@ class DualMonitorScoreboard:
             self.pres_score_a_label = tk.Label(right_frame, text=str(self.scoreA), 
                                              font=self.pres_font_score, 
                                              fg='white', bg='#111111')
-            self.pres_score_a_label.pack(pady=(0, 50))
+            self.pres_score_a_label.pack(pady=(0, 20))
+            
+            # A팀 타임아웃/파울 표시
+            stats_a_frame = tk.Frame(right_frame, bg='#111111')
+            stats_a_frame.pack(pady=10)
+            
+            tk.Label(stats_a_frame, text="TO", font=self.pres_font_stats, 
+                    fg=left_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+            self.pres_timeout_a_label = tk.Label(stats_a_frame, text=str(self.timeoutsA), 
+                                               font=self.pres_font_stats, 
+                                               fg=left_color, bg='#111111')
+            self.pres_timeout_a_label.pack(side=tk.LEFT, padx=10)
+            
+            tk.Label(stats_a_frame, text="F", font=self.pres_font_stats, 
+                    fg=left_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+            self.pres_foul_a_label = tk.Label(stats_a_frame, text=str(self.foulsA), 
+                                            font=self.pres_font_stats, 
+                                            fg=left_color, bg='#111111')
+            self.pres_foul_a_label.pack(side=tk.LEFT)
         else:
             self.pres_score_b_label = tk.Label(right_frame, text=str(self.scoreB), 
                                              font=self.pres_font_score, 
                                              fg='white', bg='#111111')
-            self.pres_score_b_label.pack(pady=(0, 50))
+            self.pres_score_b_label.pack(pady=(0, 20))
+            
+            # B팀 타임아웃/파울 표시
+            stats_b_frame = tk.Frame(right_frame, bg='#111111')
+            stats_b_frame.pack(pady=10)
+            
+            tk.Label(stats_b_frame, text="TO", font=self.pres_font_stats, 
+                    fg=right_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+            self.pres_timeout_b_label = tk.Label(stats_b_frame, text=str(self.timeoutsB), 
+                                               font=self.pres_font_stats, 
+                                               fg=right_color, bg='#111111')
+            self.pres_timeout_b_label.pack(side=tk.LEFT, padx=10)
+            
+            tk.Label(stats_b_frame, text="F", font=self.pres_font_stats, 
+                    fg=right_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+            self.pres_foul_b_label = tk.Label(stats_b_frame, text=str(self.foulsB), 
+                                            font=self.pres_font_stats, 
+                                            fg=right_color, bg='#111111')
+            self.pres_foul_b_label.pack(side=tk.LEFT)
     
     def create_time_display(self, parent):
         """시간 표시 영역 생성"""
@@ -754,6 +838,13 @@ class DualMonitorScoreboard:
                 self.pres_score_a_label.config(text=str(self.scoreA))
                 self.pres_score_b_label.config(text=str(self.scoreB))
             
+            # 프레젠테이션 창 타임아웃/파울 업데이트
+            if hasattr(self, 'pres_timeout_a_label'):
+                self.pres_timeout_a_label.config(text=str(self.timeoutsA))
+                self.pres_timeout_b_label.config(text=str(self.timeoutsB))
+                self.pres_foul_a_label.config(text=str(self.foulsA))
+                self.pres_foul_b_label.config(text=str(self.foulsB))
+            
             self.pres_time_label.config(text=fmt_mmss_centi(self.game_seconds))
             self.pres_period_label.config(text=f"Q{self.period}")
             self.pres_shot_label.config(text=str(int(self.shot_seconds)))
@@ -787,46 +878,63 @@ class DualMonitorScoreboard:
         """설정 창 표시 (작은 화면용)"""
         settings_window = tk.Toplevel(self.root)
         settings_window.title("게임 설정")
-        settings_window.geometry("500x700")  # 더 큰 크기로 조정
+        settings_window.geometry("520x600")  # 스크롤바 공간 확보
         settings_window.configure(bg='#2a2a2a')
-        settings_window.resizable(False, False)
+        settings_window.resizable(True, True)
         
         # 설정 창을 조작용 창 위에 표시
         settings_window.transient(self.control_window)
         settings_window.grab_set()
         
-        # 설정 항목들
-        tk.Label(settings_window, text="A팀 이름:", fg='white', bg='#2a2a2a').pack(pady=5)
-        team_a_entry = tk.Entry(settings_window, font=self.font_small)
+        # 스크롤 가능한 프레임 생성
+        canvas = tk.Canvas(settings_window, bg='#2a2a2a', highlightthickness=0)
+        scrollbar = tk.Scrollbar(settings_window, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg='#2a2a2a')
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # 캔버스와 스크롤바 배치
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # 설정 항목들 (스크롤 가능한 프레임 안에)
+        tk.Label(scrollable_frame, text="A팀 이름:", fg='white', bg='#2a2a2a').pack(pady=5)
+        team_a_entry = tk.Entry(scrollable_frame, font=self.font_small)
         team_a_entry.pack(pady=5)
         team_a_entry.insert(0, self.cfg["teamA"])
         
-        tk.Label(settings_window, text="B팀 이름:", fg='white', bg='#2a2a2a').pack(pady=5)
-        team_b_entry = tk.Entry(settings_window, font=self.font_small)
+        tk.Label(scrollable_frame, text="B팀 이름:", fg='white', bg='#2a2a2a').pack(pady=5)
+        team_b_entry = tk.Entry(scrollable_frame, font=self.font_small)
         team_b_entry.pack(pady=5)
         team_b_entry.insert(0, self.cfg["teamB"])
         
-        tk.Label(settings_window, text="듀얼모니터:", fg='white', bg='#2a2a2a').pack(pady=5)
+        tk.Label(scrollable_frame, text="듀얼모니터:", fg='white', bg='#2a2a2a').pack(pady=5)
         dual_monitor_var = tk.BooleanVar(value=self.cfg.get("dual_monitor", False))
-        tk.Checkbutton(settings_window, variable=dual_monitor_var, 
+        tk.Checkbutton(scrollable_frame, variable=dual_monitor_var, 
                       fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
         
-        tk.Label(settings_window, text="모니터 내용 전환 (1-2 ↔ 2-1):", fg='white', bg='#2a2a2a').pack(pady=5)
+        tk.Label(scrollable_frame, text="모니터 내용 전환 (1-2 ↔ 2-1):", fg='white', bg='#2a2a2a').pack(pady=5)
         swap_monitors_var = tk.BooleanVar(value=self.cfg.get("swap_monitors", False))
-        tk.Checkbutton(settings_window, variable=swap_monitors_var, 
+        tk.Checkbutton(scrollable_frame, variable=swap_monitors_var, 
                       fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
         
-        tk.Label(settings_window, text="팀 순서 바꾸기:", fg='white', bg='#2a2a2a').pack(pady=5)
+        tk.Label(scrollable_frame, text="팀 순서 바꾸기:", fg='white', bg='#2a2a2a').pack(pady=5)
         team_swapped_var = tk.BooleanVar(value=self.cfg.get("team_swapped", False))
-        tk.Checkbutton(settings_window, variable=team_swapped_var, 
+        tk.Checkbutton(scrollable_frame, variable=team_swapped_var, 
                       fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
         
         # 구분선
-        tk.Label(settings_window, text="─────────────────────", fg='gray', bg='#2a2a2a').pack(pady=10)
+        tk.Label(scrollable_frame, text="─────────────────────", fg='gray', bg='#2a2a2a').pack(pady=10)
         
         # 게임 시간 설정
-        tk.Label(settings_window, text="게임 시간 (분):", fg='white', bg='#2a2a2a').pack(pady=5)
-        game_minutes_frame = tk.Frame(settings_window, bg='#2a2a2a')
+        tk.Label(scrollable_frame, text="게임 시간 (분):", fg='white', bg='#2a2a2a').pack(pady=5)
+        game_minutes_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
         game_minutes_frame.pack()
         
         game_minutes_var = tk.IntVar(value=self.cfg.get("game_minutes", 9))
@@ -835,8 +943,8 @@ class DualMonitorScoreboard:
                           value=minutes, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
         
         # 타임아웃 갯수 설정
-        tk.Label(settings_window, text="타임아웃 갯수:", fg='white', bg='#2a2a2a').pack(pady=(15, 5))
-        timeout_count_frame = tk.Frame(settings_window, bg='#2a2a2a')
+        tk.Label(scrollable_frame, text="타임아웃 갯수:", fg='white', bg='#2a2a2a').pack(pady=(15, 5))
+        timeout_count_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
         timeout_count_frame.pack()
         
         timeout_count_var = tk.IntVar(value=self.cfg.get("timeout_count", 3))
@@ -845,14 +953,38 @@ class DualMonitorScoreboard:
                           value=count, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
         
         # 연장전 시간 설정
-        tk.Label(settings_window, text="연장전 시간 (분):", fg='white', bg='#2a2a2a').pack(pady=(15, 5))
-        overtime_frame = tk.Frame(settings_window, bg='#2a2a2a')
+        tk.Label(scrollable_frame, text="연장전 시간 (분):", fg='white', bg='#2a2a2a').pack(pady=(15, 5))
+        overtime_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
         overtime_frame.pack()
         
         overtime_minutes_var = tk.IntVar(value=self.cfg.get("overtime_minutes", 5))
         for minutes in range(1, 11):  # 1분부터 10분까지
             tk.Radiobutton(overtime_frame, text=f"{minutes}분", variable=overtime_minutes_var, 
                           value=minutes, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+        
+        # 구분선
+        tk.Label(scrollable_frame, text="─────────────────────", fg='gray', bg='#2a2a2a').pack(pady=10)
+        
+        # 팀 컬러 설정
+        tk.Label(scrollable_frame, text="A팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=5)
+        team_a_color_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
+        team_a_color_frame.pack()
+        
+        team_a_color_var = tk.StringVar(value=self.cfg.get("team_a_color", "white"))
+        colors = ["white", "red", "lightblue", "yellow", "lightgreen"]
+        color_names = ["흰색", "빨강", "파랑", "노랑", "초록"]
+        for color, name in zip(colors, color_names):
+            tk.Radiobutton(team_a_color_frame, text=name, variable=team_a_color_var, 
+                          value=color, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+        
+        tk.Label(scrollable_frame, text="B팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(15, 5))
+        team_b_color_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
+        team_b_color_frame.pack()
+        
+        team_b_color_var = tk.StringVar(value=self.cfg.get("team_b_color", "lightblue"))
+        for color, name in zip(colors, color_names):
+            tk.Radiobutton(team_b_color_frame, text=name, variable=team_b_color_var, 
+                          value=color, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
         
         def save_settings():
             self.cfg["teamA"] = team_a_entry.get()
@@ -865,6 +997,8 @@ class DualMonitorScoreboard:
             self.cfg["game_minutes"] = game_minutes_var.get()
             self.cfg["timeout_count"] = timeout_count_var.get()
             self.cfg["overtime_minutes"] = overtime_minutes_var.get()
+            self.cfg["team_a_color"] = team_a_color_var.get()
+            self.cfg["team_b_color"] = team_b_color_var.get()
             
             # 설정에 따른 값 업데이트
             self.cfg["game_seconds"] = self.cfg["game_minutes"] * 60
@@ -882,7 +1016,7 @@ class DualMonitorScoreboard:
             save_cfg(self.cfg)
             self.update_displays()
             
-            # 모니터 전환 설정이 변경된 경우 창을 다시 생성
+            # 모니터 전환 설정이나 팀 컬러가 변경된 경우 창을 다시 생성
             if hasattr(self, 'presentation_window') and self.cfg.get("dual_monitor", False):
                 self.presentation_window.destroy()
                 self.create_presentation_window()
@@ -890,7 +1024,7 @@ class DualMonitorScoreboard:
             settings_window.destroy()
         
         # 저장/취소 버튼 프레임
-        button_frame = tk.Frame(settings_window, bg='#2a2a2a')
+        button_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
         button_frame.pack(pady=20)
         
         tk.Button(button_frame, text="저장", command=save_settings, 
@@ -898,6 +1032,19 @@ class DualMonitorScoreboard:
         
         tk.Button(button_frame, text="취소", command=settings_window.destroy, 
                  font=self.font_small, fg='red').pack(side=tk.LEFT, padx=10)
+        
+        # 마우스 휠 스크롤 지원
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        def _bind_to_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        def _unbind_from_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+        
+        canvas.bind('<Enter>', _bind_to_mousewheel)
+        canvas.bind('<Leave>', _unbind_from_mousewheel)
     
     def run(self):
         """메인 루프 실행"""
