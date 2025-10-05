@@ -1,4 +1,8 @@
+# Pygame 버전 (기존)
 pygame>=2.0.0
 numpy>=1.21.0
 supabase>=2.0.0
 python-dotenv>=1.0.0
+
+# Tkinter 버전 (새로운 듀얼모니터 지원)
+# Tkinter는 Python 기본 내장이므로 추가 설치 불필요

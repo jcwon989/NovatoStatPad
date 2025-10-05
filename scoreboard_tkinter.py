@@ -1,0 +1,591 @@
+#!/usr/bin/env python3
+import tkinter as tk
+from tkinter import font, messagebox, ttk
+import json
+import os
+import time
+import threading
+from datetime import datetime, timedelta
+import argparse
+
+# ===== 기본 설정 =====
+PERIOD_MAX_DEFAULT = 4
+GAME_SECONDS_DEFAULT = 10*60
+SHOT_SECONDS_DEFAULT = 24
+
+CONFIG_PATH = os.path.expanduser("~/.scoreboard_config.json")
+
+def load_cfg():
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "teamA": "TEAM A",
+        "teamB": "TEAM B",
+        "game_seconds": GAME_SECONDS_DEFAULT,
+        "shot_seconds": SHOT_SECONDS_DEFAULT,
+        "period_max": PERIOD_MAX_DEFAULT,
+        "overtime_seconds": 5*60,
+        "timeouts_per_team": 3,
+        "dual_monitor": False,
+        "monitor_index": 0,
+        "team_swapped": False,
+    }
+
+def save_cfg(cfg):
+    try:
+        config_dir = os.path.dirname(CONFIG_PATH)
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir, exist_ok=True)
+        
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def fmt_mmss(s):
+    s = max(0, int(s))
+    m = s // 60
+    r = s % 60
+    return f"{m:02d}:{r:02d}"
+
+def fmt_mmss_centi(s):
+    """1/100초까지 표시하는 시간 포맷"""
+    s = max(0, s)
+    m = int(s) // 60
+    r = int(s) % 60
+    centi = int((s - int(s)) * 100)
+    return f"{m:02d}:{r:02d}.{centi:02d}"
+
+class DualMonitorScoreboard:
+    def __init__(self):
+        self.cfg = load_cfg()
+        
+        # 게임 상태
+        self.scoreA = 0
+        self.scoreB = 0
+        self.period = 1
+        self.timeoutsA = self.cfg.get("timeouts_per_team", 3)
+        self.timeoutsB = self.cfg.get("timeouts_per_team", 3)
+        self.foulsA = 0
+        self.foulsB = 0
+        self.running_game = False
+        self.running_shot = False
+        self.game_seconds = self.cfg["game_seconds"]
+        self.shot_seconds = self.cfg["shot_seconds"]
+        
+        # 팀 이름
+        self.teamA_name = self.cfg["teamA"]
+        self.teamB_name = self.cfg["teamB"]
+        
+        # 타이머
+        self.last_update = time.time()
+        self.timer_running = True
+        
+        # Tkinter 루트
+        self.root = tk.Tk()
+        self.root.withdraw()  # 메인 창 숨기기
+        
+        # 폰트 설정
+        self.setup_fonts()
+        
+        # 창 생성
+        self.create_control_window()
+        
+        if self.cfg.get("dual_monitor", False):
+            self.create_presentation_window()
+        
+        # 타이머 시작
+        self.start_timer()
+        
+        # 키보드 바인딩
+        self.setup_keyboard_bindings()
+    
+    def setup_fonts(self):
+        """폰트 설정"""
+        self.font_large = font.Font(family="Arial", size=48, weight="bold")
+        self.font_medium = font.Font(family="Arial", size=24)
+        self.font_small = font.Font(family="Arial", size=16)
+        self.font_score = font.Font(family="Arial", size=72, weight="bold")
+        self.font_time = font.Font(family="Arial", size=36, weight="bold")
+    
+    def create_control_window(self):
+        """조작용 창 생성 (첫 번째 모니터)"""
+        self.control_window = tk.Toplevel(self.root)
+        self.control_window.title("Basketball Scoreboard - Control")
+        self.control_window.geometry("900x700+0+0")  # 첫 번째 모니터
+        self.control_window.configure(bg='#1a1a1a')
+        self.control_window.resizable(False, False)
+        
+        # 메인 프레임
+        main_frame = tk.Frame(self.control_window, bg='#1a1a1a')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # 제목
+        title_label = tk.Label(main_frame, text="BASKETBALL SCOREBOARD CONTROL", 
+                              font=self.font_large, fg='white', bg='#1a1a1a')
+        title_label.pack(pady=(0, 20))
+        
+        # 스코어 표시 영역
+        score_frame = tk.Frame(main_frame, bg='#1a1a1a')
+        score_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # A팀
+        team_a_frame = tk.Frame(score_frame, bg='#1a1a1a')
+        team_a_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.team_a_label = tk.Label(team_a_frame, text=self.teamA_name, 
+                                    font=self.font_medium, fg='lightblue', bg='#1a1a1a')
+        self.team_a_label.pack()
+        
+        self.score_a_label = tk.Label(team_a_frame, text=str(self.scoreA), 
+                                     font=self.font_score, fg='white', bg='#1a1a1a')
+        self.score_a_label.pack()
+        
+        # B팀
+        team_b_frame = tk.Frame(score_frame, bg='#1a1a1a')
+        team_b_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        self.team_b_label = tk.Label(team_b_frame, text=self.teamB_name, 
+                                    font=self.font_medium, fg='lightcoral', bg='#1a1a1a')
+        self.team_b_label.pack()
+        
+        self.score_b_label = tk.Label(team_b_frame, text=str(self.scoreB), 
+                                     font=self.font_score, fg='white', bg='#1a1a1a')
+        self.score_b_label.pack()
+        
+        # 시간 및 쿼터
+        time_frame = tk.Frame(main_frame, bg='#1a1a1a')
+        time_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        self.time_label = tk.Label(time_frame, text=fmt_mmss_centi(self.game_seconds), 
+                                  font=self.font_time, fg='yellow', bg='#1a1a1a')
+        self.time_label.pack()
+        
+        self.period_label = tk.Label(time_frame, text=f"Q{self.period}", 
+                                    font=self.font_medium, fg='white', bg='#1a1a1a')
+        self.period_label.pack()
+        
+        # 조작 버튼들
+        self.create_control_buttons(main_frame)
+        
+        # 힌트
+        self.create_hints(main_frame)
+    
+    def create_control_buttons(self, parent):
+        """조작 버튼들 생성"""
+        button_frame = tk.Frame(parent, bg='#1a1a1a')
+        button_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # A팀 점수
+        a_team_frame = tk.LabelFrame(button_frame, text="A팀 점수", 
+                                    font=self.font_small, fg='lightblue', bg='#1a1a1a')
+        a_team_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        
+        tk.Button(a_team_frame, text="+1", command=lambda: self.update_score('A', 1),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(a_team_frame, text="+2", command=lambda: self.update_score('A', 2),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(a_team_frame, text="+3", command=lambda: self.update_score('A', 3),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(a_team_frame, text="-1", command=lambda: self.update_score('A', -1),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        
+        # B팀 점수
+        b_team_frame = tk.LabelFrame(button_frame, text="B팀 점수", 
+                                    font=self.font_small, fg='lightcoral', bg='#1a1a1a')
+        b_team_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
+        
+        tk.Button(b_team_frame, text="+1", command=lambda: self.update_score('B', 1),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(b_team_frame, text="+2", command=lambda: self.update_score('B', 2),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(b_team_frame, text="+3", command=lambda: self.update_score('B', 3),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(b_team_frame, text="-1", command=lambda: self.update_score('B', -1),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        
+        # 시간 조작
+        time_control_frame = tk.Frame(parent, bg='#1a1a1a')
+        time_control_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Button(time_control_frame, text="게임시간 시작/정지", 
+                 command=self.toggle_game_time, font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(time_control_frame, text="샷클럭 시작/정지", 
+                 command=self.toggle_shot_time, font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(time_control_frame, text="전체 리셋", 
+                 command=self.reset_all, font=self.font_small).pack(side=tk.LEFT, padx=5)
+        
+        # 시간 조작 버튼들
+        time_buttons_frame = tk.Frame(parent, bg='#1a1a1a')
+        time_buttons_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Button(time_buttons_frame, text="+1초", command=lambda: self.adjust_time(1),
+                 font=self.font_small).pack(side=tk.LEFT, padx=2)
+        tk.Button(time_buttons_frame, text="-1초", command=lambda: self.adjust_time(-1),
+                 font=self.font_small).pack(side=tk.LEFT, padx=2)
+        tk.Button(time_buttons_frame, text="+10초", command=lambda: self.adjust_time(10),
+                 font=self.font_small).pack(side=tk.LEFT, padx=2)
+        tk.Button(time_buttons_frame, text="-10초", command=lambda: self.adjust_time(-10),
+                 font=self.font_small).pack(side=tk.LEFT, padx=2)
+        tk.Button(time_buttons_frame, text="+1분", command=lambda: self.adjust_time(60),
+                 font=self.font_small).pack(side=tk.LEFT, padx=2)
+        tk.Button(time_buttons_frame, text="-1분", command=lambda: self.adjust_time(-60),
+                 font=self.font_small).pack(side=tk.LEFT, padx=2)
+        
+        # 쿼터 조작
+        quarter_frame = tk.Frame(parent, bg='#1a1a1a')
+        quarter_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Button(quarter_frame, text="쿼터 -1", command=lambda: self.adjust_period(-1),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        tk.Button(quarter_frame, text="쿼터 +1", command=lambda: self.adjust_period(1),
+                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+    
+    def create_hints(self, parent):
+        """힌트 표시"""
+        hints_frame = tk.LabelFrame(parent, text="키보드 단축키", 
+                                   font=self.font_small, fg='gray', bg='#1a1a1a')
+        hints_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        hints_text = """점수: 1/2/3(A팀 +1/+2/+3) | 0/9/8(B팀 +1/+2/+3) | `/-(A/B팀 -1)
+시간: 스페이스(게임시간) | S(샷클럭) | ←→(±1초) | ↑↓(±10초) | <>(±1분)
+게임: R(리셋) | [](쿼터 ±1) | Ctrl+T(팀 순서 바꾸기) | F2(설정)"""
+        
+        hints_label = tk.Label(hints_frame, text=hints_text, 
+                              font=self.font_small, fg='gray', bg='#1a1a1a', justify=tk.LEFT)
+        hints_label.pack(anchor=tk.W)
+    
+    def create_presentation_window(self):
+        """프레젠테이션용 전체화면 창 생성 (두 번째 모니터)"""
+        self.presentation_window = tk.Toplevel(self.root)
+        self.presentation_window.title("Basketball Scoreboard - Presentation")
+        
+        # 두 번째 모니터에 배치 (첫 번째 모니터 너비만큼 오른쪽으로)
+        screen_width = self.root.winfo_screenwidth()
+        self.presentation_window.geometry(f"1920x1080+{screen_width}+0")
+        
+        self.presentation_window.configure(bg='#111111')
+        self.presentation_window.attributes('-fullscreen', True)
+        self.presentation_window.resizable(False, False)
+        
+        # 메인 프레임
+        main_frame = tk.Frame(self.presentation_window, bg='#111111')
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 팀 순서가 바뀌었는지 확인
+        is_swapped = self.cfg.get("team_swapped", False)
+        
+        if is_swapped:
+            # 팀 순서가 바뀐 경우: B팀이 왼쪽, A팀이 오른쪽
+            self.create_team_display(main_frame, self.teamB_name, self.teamA_name, 
+                                   'lightcoral', 'lightblue', True)
+        else:
+            # 기본 순서: A팀이 왼쪽, B팀이 오른쪽
+            self.create_team_display(main_frame, self.teamA_name, self.teamB_name, 
+                                   'lightblue', 'lightcoral', False)
+        
+        # 중앙 시간 표시
+        self.create_time_display(main_frame)
+    
+    def create_team_display(self, parent, left_team, right_team, left_color, right_color, swapped):
+        """팀 표시 영역 생성"""
+        # 왼쪽 팀 (A팀 또는 B팀)
+        left_frame = tk.Frame(parent, bg='#111111')
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        left_team_label = tk.Label(left_frame, text=left_team, 
+                                  font=font.Font(family="Arial", size=60, weight="bold"), 
+                                  fg=left_color, bg='#111111')
+        left_team_label.pack(pady=(50, 20))
+        
+        if swapped:
+            self.pres_score_b_label = tk.Label(left_frame, text=str(self.scoreB), 
+                                             font=font.Font(family="Arial", size=200, weight="bold"), 
+                                             fg='white', bg='#111111')
+            self.pres_score_b_label.pack(pady=(0, 50))
+        else:
+            self.pres_score_a_label = tk.Label(left_frame, text=str(self.scoreA), 
+                                             font=font.Font(family="Arial", size=200, weight="bold"), 
+                                             fg='white', bg='#111111')
+            self.pres_score_a_label.pack(pady=(0, 50))
+        
+        # 오른쪽 팀 (B팀 또는 A팀)
+        right_frame = tk.Frame(parent, bg='#111111')
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        right_team_label = tk.Label(right_frame, text=right_team, 
+                                   font=font.Font(family="Arial", size=60, weight="bold"), 
+                                   fg=right_color, bg='#111111')
+        right_team_label.pack(pady=(50, 20))
+        
+        if swapped:
+            self.pres_score_a_label = tk.Label(right_frame, text=str(self.scoreA), 
+                                             font=font.Font(family="Arial", size=200, weight="bold"), 
+                                             fg='white', bg='#111111')
+            self.pres_score_a_label.pack(pady=(0, 50))
+        else:
+            self.pres_score_b_label = tk.Label(right_frame, text=str(self.scoreB), 
+                                             font=font.Font(family="Arial", size=200, weight="bold"), 
+                                             fg='white', bg='#111111')
+            self.pres_score_b_label.pack(pady=(0, 50))
+    
+    def create_time_display(self, parent):
+        """시간 표시 영역 생성"""
+        time_frame = tk.Frame(parent, bg='#111111')
+        time_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 게임 시간
+        self.pres_time_label = tk.Label(time_frame, text=fmt_mmss_centi(self.game_seconds), 
+                                       font=font.Font(family="Arial", size=80, weight="bold"), 
+                                       fg='yellow', bg='#111111')
+        self.pres_time_label.pack(pady=(100, 20))
+        
+        # 쿼터
+        self.pres_period_label = tk.Label(time_frame, text=f"Q{self.period}", 
+                                         font=font.Font(family="Arial", size=60, weight="bold"), 
+                                         fg='white', bg='#111111')
+        self.pres_period_label.pack(pady=(0, 20))
+        
+        # 샷 클럭
+        self.pres_shot_label = tk.Label(time_frame, text=str(int(self.shot_seconds)), 
+                                       font=font.Font(family="Arial", size=100, weight="bold"), 
+                                       fg='orange', bg='#111111')
+        self.pres_shot_label.pack(pady=(0, 50))
+    
+    def setup_keyboard_bindings(self):
+        """키보드 바인딩 설정"""
+        self.root.bind('<Key>', self.on_key_press)
+        self.control_window.bind('<Key>', self.on_key_press)
+        self.control_window.focus_set()
+        
+        if hasattr(self, 'presentation_window'):
+            self.presentation_window.bind('<Key>', self.on_key_press)
+    
+    def on_key_press(self, event):
+        """키보드 입력 처리"""
+        key = event.keysym
+        
+        if key == '1':
+            self.update_score('A', 1)
+        elif key == '2':
+            self.update_score('A', 2)
+        elif key == '3':
+            self.update_score('A', 3)
+        elif key == '0':
+            self.update_score('B', 1)
+        elif key == '9':
+            self.update_score('B', 2)
+        elif key == '8':
+            self.update_score('B', 3)
+        elif key == 'grave':  # ` 키
+            self.update_score('A', -1)
+        elif key == 'minus':
+            self.update_score('B', -1)
+        elif key == 'space':
+            self.toggle_game_time()
+        elif key == 's':
+            self.toggle_shot_time()
+        elif key == 'r':
+            self.reset_all()
+        elif key == 'Left':
+            self.adjust_time(-1)
+        elif key == 'Right':
+            self.adjust_time(1)
+        elif key == 'Up':
+            self.adjust_time(10)
+        elif key == 'Down':
+            self.adjust_time(-10)
+        elif key == 'comma':  # < 키
+            self.adjust_time(-60)
+        elif key == 'period':  # > 키
+            self.adjust_time(60)
+        elif key == 'bracketleft':  # [ 키
+            self.adjust_period(-1)
+        elif key == 'bracketright':  # ] 키
+            self.adjust_period(1)
+        elif key == 'F2':
+            self.show_settings()
+    
+    def update_score(self, team, points):
+        """점수 업데이트"""
+        if team == 'A':
+            self.scoreA = max(0, self.scoreA + points)
+        else:
+            self.scoreB = max(0, self.scoreB + points)
+        self.update_displays()
+    
+    def toggle_game_time(self):
+        """게임 시간 시작/정지"""
+        self.running_game = not self.running_game
+        self.update_displays()
+    
+    def toggle_shot_time(self):
+        """샷 클럭 시작/정지"""
+        self.running_shot = not self.running_shot
+        self.update_displays()
+    
+    def adjust_time(self, seconds):
+        """시간 조정"""
+        self.game_seconds = max(0, self.game_seconds + seconds)
+        self.update_displays()
+    
+    def adjust_period(self, delta):
+        """쿼터 조정"""
+        self.period = max(1, min(self.cfg.get("period_max", 4), self.period + delta))
+        self.update_displays()
+    
+    def reset_all(self):
+        """전체 리셋"""
+        self.scoreA = 0
+        self.scoreB = 0
+        self.period = 1
+        self.timeoutsA = self.cfg.get("timeouts_per_team", 3)
+        self.timeoutsB = self.cfg.get("timeouts_per_team", 3)
+        self.foulsA = 0
+        self.foulsB = 0
+        self.running_game = False
+        self.running_shot = False
+        self.game_seconds = self.cfg["game_seconds"]
+        self.shot_seconds = self.cfg["shot_seconds"]
+        self.update_displays()
+    
+    def start_timer(self):
+        """타이머 시작"""
+        def timer_thread():
+            while self.timer_running:
+                current_time = time.time()
+                dt = current_time - self.last_update
+                self.last_update = current_time
+                
+                # 게임 시간 업데이트
+                if self.running_game and self.game_seconds > 0:
+                    self.game_seconds = max(0, self.game_seconds - dt)
+                
+                # 샷 클럭 업데이트
+                if self.running_shot and self.shot_seconds > 0:
+                    self.shot_seconds = max(0, self.shot_seconds - dt)
+                
+                # UI 업데이트 (메인 스레드에서)
+                self.root.after(0, self.update_displays)
+                
+                time.sleep(1/60)  # 60 FPS
+        
+        timer = threading.Thread(target=timer_thread, daemon=True)
+        timer.start()
+    
+    def update_displays(self):
+        """화면 업데이트"""
+        # 조작용 창 업데이트
+        self.score_a_label.config(text=str(self.scoreA))
+        self.score_b_label.config(text=str(self.scoreB))
+        self.time_label.config(text=fmt_mmss_centi(self.game_seconds))
+        self.period_label.config(text=f"Q{self.period}")
+        
+        # 프레젠테이션 창 업데이트
+        if hasattr(self, 'presentation_window'):
+            # 팀 순서에 따라 점수 표시
+            is_swapped = self.cfg.get("team_swapped", False)
+            if is_swapped:
+                self.pres_score_b_label.config(text=str(self.scoreB))
+                self.pres_score_a_label.config(text=str(self.scoreA))
+            else:
+                self.pres_score_a_label.config(text=str(self.scoreA))
+                self.pres_score_b_label.config(text=str(self.scoreB))
+            
+            self.pres_time_label.config(text=fmt_mmss_centi(self.game_seconds))
+            self.pres_period_label.config(text=f"Q{self.period}")
+            self.pres_shot_label.config(text=str(int(self.shot_seconds)))
+            
+            # 마지막 10초부터 빨간색
+            if self.game_seconds <= 10:
+                self.pres_time_label.config(fg='red')
+            else:
+                self.pres_time_label.config(fg='yellow')
+            
+            # 마지막 5초부터 샷클럭 빨간색
+            if self.shot_seconds <= 5:
+                self.pres_shot_label.config(fg='red')
+            else:
+                self.pres_shot_label.config(fg='orange')
+    
+    def show_settings(self):
+        """설정 창 표시"""
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("게임 설정")
+        settings_window.geometry("400x500")
+        settings_window.configure(bg='#2a2a2a')
+        settings_window.resizable(False, False)
+        
+        # 설정 항목들
+        tk.Label(settings_window, text="A팀 이름:", fg='white', bg='#2a2a2a').pack(pady=5)
+        team_a_entry = tk.Entry(settings_window, font=self.font_small)
+        team_a_entry.pack(pady=5)
+        team_a_entry.insert(0, self.cfg["teamA"])
+        
+        tk.Label(settings_window, text="B팀 이름:", fg='white', bg='#2a2a2a').pack(pady=5)
+        team_b_entry = tk.Entry(settings_window, font=self.font_small)
+        team_b_entry.pack(pady=5)
+        team_b_entry.insert(0, self.cfg["teamB"])
+        
+        tk.Label(settings_window, text="듀얼모니터:", fg='white', bg='#2a2a2a').pack(pady=5)
+        dual_monitor_var = tk.BooleanVar(value=self.cfg.get("dual_monitor", False))
+        tk.Checkbutton(settings_window, variable=dual_monitor_var, 
+                      fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
+        
+        tk.Label(settings_window, text="팀 순서 바꾸기:", fg='white', bg='#2a2a2a').pack(pady=5)
+        team_swapped_var = tk.BooleanVar(value=self.cfg.get("team_swapped", False))
+        tk.Checkbutton(settings_window, variable=team_swapped_var, 
+                      fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
+        
+        def save_settings():
+            self.cfg["teamA"] = team_a_entry.get()
+            self.cfg["teamB"] = team_b_entry.get()
+            self.cfg["dual_monitor"] = dual_monitor_var.get()
+            self.cfg["team_swapped"] = team_swapped_var.get()
+            
+            self.teamA_name = self.cfg["teamA"]
+            self.teamB_name = self.cfg["teamB"]
+            
+            save_cfg(self.cfg)
+            self.update_displays()
+            settings_window.destroy()
+        
+        tk.Button(settings_window, text="저장", command=save_settings, 
+                 font=self.font_small).pack(pady=20)
+    
+    def run(self):
+        """메인 루프 실행"""
+        try:
+            self.root.mainloop()
+        except KeyboardInterrupt:
+            self.timer_running = False
+            self.root.quit()
+
+def main():
+    parser = argparse.ArgumentParser(description="Tkinter Basketball Scoreboard")
+    parser.add_argument("--teamA", type=str, help="A팀 이름")
+    parser.add_argument("--teamB", type=str, help="B팀 이름")
+    parser.add_argument("--game", type=int, help="게임 시간 (초)")
+    parser.add_argument("--shot", type=int, help="샷 클럭 시간 (초)")
+    parser.add_argument("--periods", type=int, help="최대 쿼터 수")
+    args = parser.parse_args()
+    
+    # 설정 로드 및 명령행 인수 적용
+    cfg = load_cfg()
+    if args.teamA: cfg["teamA"] = args.teamA
+    if args.teamB: cfg["teamB"] = args.teamB
+    if args.game: cfg["game_seconds"] = max(1, int(args.game))
+    if args.shot: cfg["shot_seconds"] = max(1, int(args.shot))
+    if args.periods: cfg["period_max"] = max(1, int(args.periods))
+    save_cfg(cfg)
+    
+    # 스코어보드 실행
+    app = DualMonitorScoreboard()
+    app.run()
+
+if __name__ == "__main__":
+    main()

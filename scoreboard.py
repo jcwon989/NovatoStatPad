@@ -10,6 +10,8 @@ GAME_SECONDS_DEFAULT = 10*60
 SHOT_SECONDS_DEFAULT = 24
 
 CONFIG_PATH = os.path.expanduser("~/.scoreboard_config.json")
+DUAL_MONITOR_LOCK_FILE = os.path.expanduser("~/.scoreboard_dual_monitor.lock")
+SYNC_DATA_FILE = os.path.expanduser("~/.scoreboard_sync.json")
 FONT_CANDIDATES = [
     "font/Pretendard-Bold.otf",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -38,6 +40,10 @@ def load_cfg():
         "width": 1920,
         "height": 1080,
         "hints_visible": True,
+        "dual_monitor": False,  # 듀얼모니터 사용 여부
+        "monitor_index": 0,  # 사용할 모니터 인덱스 (0=주모니터, 1=보조모니터)
+        "team_swapped": False,  # 팀 순서 바뀜 여부
+        "presentation_mode": False,  # 프레젠테이션 모드 (전체화면 스코어보드만)
     }
 
 def save_cfg(cfg):
@@ -51,6 +57,68 @@ def save_cfg(cfg):
             json.dump(cfg, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+def check_dual_monitor_lock():
+    """듀얼모니터 프로세스가 이미 실행 중인지 확인"""
+    if os.path.exists(DUAL_MONITOR_LOCK_FILE):
+        try:
+            with open(DUAL_MONITOR_LOCK_FILE, "r") as f:
+                pid = int(f.read().strip())
+            # 프로세스가 실제로 실행 중인지 확인
+            try:
+                os.kill(pid, 0)  # 프로세스가 존재하면 예외 없음
+                return True  # 프로세스가 실행 중
+            except OSError:
+                # 프로세스가 없으면 락 파일 삭제
+                os.remove(DUAL_MONITOR_LOCK_FILE)
+                return False
+        except Exception:
+            # 락 파일이 손상된 경우 삭제
+            try:
+                os.remove(DUAL_MONITOR_LOCK_FILE)
+            except Exception:
+                pass
+            return False
+    return False
+
+def create_dual_monitor_lock():
+    """듀얼모니터 락 파일 생성"""
+    try:
+        with open(DUAL_MONITOR_LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        return True
+    except Exception:
+        return False
+
+def remove_dual_monitor_lock():
+    """듀얼모니터 락 파일 삭제"""
+    try:
+        if os.path.exists(DUAL_MONITOR_LOCK_FILE):
+            os.remove(DUAL_MONITOR_LOCK_FILE)
+    except Exception:
+        pass
+
+def save_sync_data(data):
+    """동기화 데이터 저장"""
+    try:
+        with open(SYNC_DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+def load_sync_data():
+    """동기화 데이터 로드"""
+    try:
+        if os.path.exists(SYNC_DATA_FILE):
+            with open(SYNC_DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None
+
+def is_master_process():
+    """메인 프로세스인지 확인"""
+    return not os.getenv('DUAL_MONITOR_MODE', '0') == '1'
 
 def show_exit_confirm_fullscreen(screen, font_large, font_medium):
     """종료 확인 전체화면 표시 (hint 스타일)"""
@@ -87,8 +155,8 @@ def show_settings_window(cfg):
     original_size = pygame.display.get_surface().get_size()
     original_caption = pygame.display.get_caption()
     
-    # 설정 창 화면으로 전환
-    settings_screen = pygame.display.set_mode((800, 600))
+    # 설정 창 화면으로 전환 (높이를 늘려서 모든 필드가 보이도록)
+    settings_screen = pygame.display.set_mode((800, 750))
     pygame.display.set_caption("게임 설정")
     
     # 설정이 변경되었는지 추적
@@ -107,7 +175,11 @@ def show_settings_window(cfg):
         "overtime_seconds": str(cfg.get("overtime_seconds", 5*60) // 60),
         "shot_seconds": str(cfg["shot_seconds"]),
         "period_max": str(cfg["period_max"]),
-        "timeouts_per_team": str(cfg.get("timeouts_per_team", 3))
+        "timeouts_per_team": str(cfg.get("timeouts_per_team", 3)),
+        "dual_monitor": "1" if cfg.get("dual_monitor", False) else "0",
+        "monitor_index": str(cfg.get("monitor_index", 0)),
+        "team_swapped": "1" if cfg.get("team_swapped", False) else "0",
+        "presentation_mode": "1" if cfg.get("presentation_mode", False) else "0"
     }
     
     # 입력 필드 정보
@@ -119,6 +191,10 @@ def show_settings_window(cfg):
         {"key": "shot_seconds", "label": "샷 클럭 (초)", "x": 450, "y": 150, "width": 150},
         {"key": "period_max", "label": "최대 쿼터 수", "x": 50, "y": 220, "width": 150},
         {"key": "timeouts_per_team", "label": "팀당 타임아웃 수", "x": 250, "y": 220, "width": 150},
+        {"key": "dual_monitor", "label": "듀얼모니터 (0=끄기, 1=켜기)", "x": 50, "y": 290, "width": 250},
+        {"key": "monitor_index", "label": "모니터 선택 (0=주모니터, 1=보조모니터)", "x": 50, "y": 360, "width": 250},
+        {"key": "team_swapped", "label": "팀 순서 바꿈 (0=기본, 1=바꿈)", "x": 50, "y": 430, "width": 250},
+        {"key": "presentation_mode", "label": "프레젠테이션 모드 (0=조작창, 1=전체화면)", "x": 50, "y": 500, "width": 250},
     ]
     
     active_field = None
@@ -147,6 +223,10 @@ def show_settings_window(cfg):
                         cfg["shot_seconds"] = int(settings["shot_seconds"])
                         cfg["period_max"] = int(settings["period_max"])
                         cfg["timeouts_per_team"] = int(settings["timeouts_per_team"])
+                        cfg["dual_monitor"] = settings["dual_monitor"] == "1"
+                        cfg["monitor_index"] = int(settings["monitor_index"])
+                        cfg["team_swapped"] = settings["team_swapped"] == "1"
+                        cfg["presentation_mode"] = settings["presentation_mode"] == "1"
                         save_cfg(cfg)
                         # 원래 화면으로 복원
                         pygame.display.set_mode(original_size)
@@ -168,6 +248,10 @@ def show_settings_window(cfg):
                         if field["key"] in ["teamA", "teamB"]:
                             # 팀명은 모든 문자 허용
                             settings[field["key"]] += event.unicode
+                        elif field["key"] in ["dual_monitor", "monitor_index", "team_swapped", "presentation_mode"]:
+                            # 0 또는 1만 허용
+                            if event.unicode in ["0", "1"]:
+                                settings[field["key"]] = event.unicode
                         else:
                             # 숫자만 허용
                             if event.unicode.isdigit():
@@ -210,10 +294,88 @@ def show_settings_window(cfg):
         ]
         for i, text in enumerate(help_text):
             help_surf = font_small.render(text, True, (150, 150, 150))
-            settings_screen.blit(help_surf, (50, 500 + i * 25))
+            settings_screen.blit(help_surf, (50, 650 + i * 25))
         
         pygame.display.flip()
         clock.tick(60)
+
+def get_monitor_info():
+    """사용 가능한 모니터 정보를 반환"""
+    try:
+        import pygame.display
+        # pygame.display.init()이 이미 호출되어야 함
+        display_info = pygame.display.Info()
+        # 단일 모니터 정보만 반환됨 (pygame의 한계)
+        return [{
+            "index": 0,
+            "width": display_info.current_w,
+            "height": display_info.current_h,
+            "name": "Primary Monitor"
+        }]
+    except Exception:
+        return [{"index": 0, "width": 1920, "height": 1080, "name": "Default Monitor"}]
+
+def init_single_display(cfg, is_presentation=False):
+    """단일 디스플레이 초기화"""
+    # 프레젠테이션 모드인 경우 전체화면으로 강제 설정
+    if is_presentation:
+        flags = pygame.FULLSCREEN
+        caption = "Basketball Scoreboard - Presentation"
+    else:
+        # 조작용 창은 윈도우 모드
+        flags = 0
+        cfg["windowed"] = True
+        caption = "Basketball Scoreboard - Control"
+    
+    # 모니터 위치 설정
+    if is_presentation:
+        # 프레젠테이션 모드는 두 번째 모니터에 배치
+        os.environ['SDL_VIDEO_WINDOW_POS'] = f'{cfg["width"]},0'
+    else:
+        # 조작용 창은 주모니터에 배치
+        os.environ['SDL_VIDEO_WINDOW_POS'] = '0,0'
+    
+    screen = pygame.display.set_mode((cfg["width"], cfg["height"]), flags)
+    pygame.display.set_caption(caption)
+    return screen
+
+def init_dual_display(cfg):
+    """듀얼모니터용 두 개의 디스플레이 초기화"""
+    pygame.init()
+    
+    # 조작용 창 (첫 번째 모니터)
+    os.environ['SDL_VIDEO_WINDOW_POS'] = '0,0'
+    control_screen = pygame.display.set_mode((cfg["width"], cfg["height"]), 0)
+    pygame.display.set_caption("Basketball Scoreboard - Control")
+    
+    # 프레젠테이션용 전체화면 (두 번째 모니터)
+    # pygame의 한계로 인해 두 번째 창을 직접 만들 수 없으므로
+    # 대신 메모리 서피스를 생성하고 나중에 복사하는 방식 사용
+    presentation_surface = pygame.Surface((cfg["width"], cfg["height"]))
+    
+    return control_screen, presentation_surface
+
+def create_dual_monitor_screens(cfg):
+    """듀얼모니터용 두 개의 화면 생성 - 윈도우 모드로 각각 다른 모니터에 배치"""
+    # 듀얼모니터 모드에서는 반드시 윈도우 모드 사용
+    cfg["windowed"] = True
+    
+    # 첫 번째 화면 (주모니터)
+    os.environ['SDL_VIDEO_WINDOW_POS'] = '0,0'
+    screen1 = pygame.display.set_mode((cfg["width"], cfg["height"]), pygame.RESIZABLE)
+    pygame.display.set_caption("Basketball Scoreboard - Monitor 1")
+    
+    # pygame은 한 번에 하나의 창만 만들 수 있으므로, 
+    # 두 번째 화면은 별도로 생성하지 않고 None으로 설정
+    # 대신 나중에 복사하는 방식 사용
+    screen2 = None
+    
+    return [screen1, screen2], cfg
+
+def launch_dual_monitor_instance(cfg, monitor_index):
+    """듀얼모니터용 별도 인스턴스 실행 - 더 이상 사용하지 않음"""
+    # 이 함수는 더 이상 사용하지 않음
+    return False
 
 def load_font(size):
     for p in FONT_CANDIDATES:
@@ -270,7 +432,22 @@ def main():
         load_dotenv()
     except Exception:
         pass
+    
+    # 듀얼모니터 모드 확인
+    is_dual_monitor_mode = os.getenv('DUAL_MONITOR_MODE', '0') == '1'
+    monitor_index = int(os.getenv('MONITOR_INDEX', '0'))
+    team_swapped_env = os.getenv('TEAM_SWAPPED', '0') == '1'
+    presentation_mode_env = os.getenv('PRESENTATION_MODE', '0') == '1'
+    
     cfg = parse_args(load_cfg())
+    
+    # 듀얼모니터 모드인 경우 설정 적용
+    if is_dual_monitor_mode:
+        cfg["dual_monitor"] = True
+        cfg["monitor_index"] = monitor_index
+        cfg["team_swapped"] = team_swapped_env  # 환경변수에서 팀 순서 설정
+        cfg["presentation_mode"] = presentation_mode_env  # 환경변수에서 프레젠테이션 모드 설정
+    
     save_cfg(cfg)  # 사용자가 준 옵션을 저장
 
     teamA_name = cfg["teamA"]
@@ -280,12 +457,43 @@ def main():
     SHOT_SECONDS_INIT = cfg["shot_seconds"]
     TIMEOUTS_INIT = cfg.get("timeouts_per_team", 3)
 
-    pygame.init()
-    flags = 0
-    if not cfg["windowed"]:
-        flags |= pygame.FULLSCREEN
-    screen = pygame.display.set_mode((cfg["width"], cfg["height"]), flags)
-    pygame.display.set_caption("Basketball Scoreboard")
+    # 듀얼모니터 지원 초기화
+    if cfg.get("dual_monitor", False) and is_master_process():
+        # 메인 프로세스에서만 두 번째 모니터용 프로세스를 실행
+        if not check_dual_monitor_lock():
+            try:
+                import subprocess
+                import sys
+                
+                # 현재 스크립트의 경로
+                script_path = os.path.abspath(__file__)
+                
+                # 두 번째 모니터용 별도 프로세스 실행 (프레젠테이션 모드)
+                env = os.environ.copy()
+                env['DUAL_MONITOR_MODE'] = '1'
+                env['MONITOR_INDEX'] = '1'
+                env['PRESENTATION_MODE'] = '1'  # 프레젠테이션 모드로 실행
+                
+                subprocess.Popen([sys.executable, script_path], env=env)
+                create_dual_monitor_lock()  # 락 파일 생성
+                print("듀얼모니터 모드가 활성화되었습니다.")
+                print("- 첫 번째 모니터: 조작용 창 (힌트 표시)")
+                print("- 두 번째 모니터: 프레젠테이션용 전체화면")
+                print("- 두 화면이 실시간으로 동기화됩니다")
+            except Exception as e:
+                print(f"듀얼모니터 초기화 실패: {e}")
+        else:
+            print("듀얼모니터 프로세스가 이미 실행 중입니다.")
+        
+        # 메인 화면은 조작용 창으로 초기화 (힌트 표시)
+        cfg["presentation_mode"] = False
+        screen = init_single_display(cfg, False)
+        dual_screen = None
+    else:
+        # 일반 모드 또는 보조 프로세스인 경우
+        is_presentation = cfg.get("presentation_mode", False) or is_dual_monitor_mode
+        screen = init_single_display(cfg, is_presentation)
+        dual_screen = None
 
     W, H = screen.get_size()
     clock = pygame.time.Clock()
@@ -336,8 +544,17 @@ def main():
 
     last_t = time.perf_counter()
     mouse_visible = False
-    hints_visible = cfg.get("hints_visible", True)
+    # 프레젠테이션 모드인 경우 힌트를 숨김
+    if cfg.get("presentation_mode", False):
+        hints_visible = False
+    else:
+        hints_visible = cfg.get("hints_visible", True)
     pygame.mouse.set_visible(mouse_visible)
+    
+    # 보조 프로세스인 경우 동기화된 데이터를 사용하기 위한 변수들
+    if not is_master_process():
+        # 보조 프로세스에서는 동기화된 데이터를 읽어서 사용
+        pass
     # 한글 입력 경고 타임스탬프 초기화
     last_korean_warning_at = None
 
@@ -400,6 +617,51 @@ def main():
     def render():
         screen.fill((17,17,17))
         
+        # 메인 프로세스인 경우 현재 상태를 동기화 파일에 저장
+        if is_master_process():
+            sync_data = {
+                "scoreA": scoreA,
+                "scoreB": scoreB,
+                "period": period,
+                "timeoutsA": timeoutsA,
+                "timeoutsB": timeoutsB,
+                "foulsA": foulsA,
+                "foulsB": foulsB,
+                "running_game": running_game,
+                "running_shot": running_shot,
+                "game_seconds": game_seconds,
+                "shot_seconds": shot_seconds,
+                "teamA_name": teamA_name,
+                "teamB_name": teamB_name,
+                "hints_visible": hints_visible,
+                "last_korean_warning_at": last_korean_warning_at
+            }
+            save_sync_data(sync_data)
+        else:
+            # 보조 프로세스인 경우 동기화된 데이터 읽기
+            sync_data = load_sync_data()
+            if sync_data:
+                # 동기화된 데이터로 렌더링에 사용할 변수 업데이트
+                global scoreA, scoreB, period, timeoutsA, timeoutsB, foulsA, foulsB
+                global running_game, running_shot, game_seconds, shot_seconds
+                global teamA_name, teamB_name, hints_visible, last_korean_warning_at
+                
+                scoreA = sync_data.get("scoreA", scoreA)
+                scoreB = sync_data.get("scoreB", scoreB)
+                period = sync_data.get("period", period)
+                timeoutsA = sync_data.get("timeoutsA", timeoutsA)
+                timeoutsB = sync_data.get("timeoutsB", timeoutsB)
+                foulsA = sync_data.get("foulsA", foulsA)
+                foulsB = sync_data.get("foulsB", foulsB)
+                running_game = sync_data.get("running_game", running_game)
+                running_shot = sync_data.get("running_shot", running_shot)
+                game_seconds = sync_data.get("game_seconds", game_seconds)
+                shot_seconds = sync_data.get("shot_seconds", shot_seconds)
+                teamA_name = sync_data.get("teamA_name", teamA_name)
+                teamB_name = sync_data.get("teamB_name", teamB_name)
+                hints_visible = sync_data.get("hints_visible", hints_visible)
+                last_korean_warning_at = sync_data.get("last_korean_warning_at", last_korean_warning_at)
+        
         if hints_visible:
             # 힌트만 표시
             hints = [
@@ -409,11 +671,13 @@ def main():
                 "",
                 "샷클럭 조작: S(샷클럭 시작/정지) | D(24초 리셋) | F(14초 리셋) | C/V(±1초)",
                 "",
-                "게임 :  R(전체 리셋) | [ / ](쿼터 감소/증가)", 
+                "게임 : R(전체 리셋) | [ / ](쿼터 감소/증가)", 
                 "",
-                "기타: Q/W(A팀 타임아웃 ±1) | Z/X(A A팀 파울 ±1) | O/P(B팀 타임아웃 ±1) | N/M(A/B팀 파울 ±1)",
+                "기타: Q/W(A팀 타임아웃 ±1) | Z/X(A A팀 파울 ±1) | O/P(B팀 타임아웃 ±1) | N/M(B팀 파울 ±1)",
                 "",
-                "환경: G(전체화면) | J(마우스) | H(힌트) | F2(설정) | Esc(종료)",
+                "환경: G(전체화면) | J(마우스) | H(힌트) | F2(설정) | Ctrl+T(팀 순서 바꾸기) | Esc(종료)",
+                "",
+                "듀얼모니터: F2 설정에서 듀얼모니터 모드 활성화 가능",
             ]
             # 힌트를 화면 중앙에 표시 (줄간격 개선)
             line_height = int(H*0.05)  # 줄간격을 더 넓게 (5%)
@@ -422,29 +686,59 @@ def main():
                 surf = fontSmall.render(line, True, (200,200,200))
                 screen.blit(surf, (W//2 - surf.get_width()//2, start_y + i*line_height))
         else:
-            # 좌단: A팀 정보
-            left_x = W // 6
-            teamA = fontTeam.render(teamA_name, True, (220,220,220))
-            scoreA_surf = fontScore.render(str(scoreA), True, (255,255,255))
-            timeoutA_surf = fontTimeout.render(f"Timeouts: {timeoutsA}", True, (180,180,220))
-            foulA_surf = fontTimeout.render(f"Fouls: {foulsA}", True, (220,180,180))
+            # 팀 순서가 바뀌었는지 확인
+            is_swapped = cfg.get("team_swapped", False)
             
-            screen.blit(teamA, (left_x - teamA.get_width()//2, int(H*0.2)))
-            screen.blit(scoreA_surf, (left_x - scoreA_surf.get_width()//2, int(H*0.35)))
-            screen.blit(timeoutA_surf, (left_x - timeoutA_surf.get_width()//2, int(H*0.75)))
-            screen.blit(foulA_surf, (left_x - foulA_surf.get_width()//2, int(H*0.85)))
+            if is_swapped:
+                # 팀 순서가 바뀐 경우: B팀이 왼쪽, A팀이 오른쪽
+                # 좌단: B팀 정보
+                left_x = W // 6
+                team_left = fontTeam.render(teamB_name, True, (220,220,220))
+                score_left_surf = fontScore.render(str(scoreB), True, (255,255,255))
+                timeout_left_surf = fontTimeout.render(f"Timeouts: {timeoutsB}", True, (220,180,180))
+                foul_left_surf = fontTimeout.render(f"Fouls: {foulsB}", True, (180,180,220))
+                
+                screen.blit(team_left, (left_x - team_left.get_width()//2, int(H*0.2)))
+                screen.blit(score_left_surf, (left_x - score_left_surf.get_width()//2, int(H*0.35)))
+                screen.blit(timeout_left_surf, (left_x - timeout_left_surf.get_width()//2, int(H*0.75)))
+                screen.blit(foul_left_surf, (left_x - foul_left_surf.get_width()//2, int(H*0.85)))
 
-            # 우단: B팀 정보
-            right_x = W * 5 // 6
-            teamB = fontTeam.render(teamB_name, True, (220,220,220))
-            scoreB_surf = fontScore.render(str(scoreB), True, (255,255,255))
-            timeoutB_surf = fontTimeout.render(f"Timeouts: {timeoutsB}", True, (220,180,180))
-            foulB_surf = fontTimeout.render(f"Fouls: {foulsB}", True, (180,180,220))
-            
-            screen.blit(teamB, (right_x - teamB.get_width()//2, int(H*0.2)))
-            screen.blit(scoreB_surf, (right_x - scoreB_surf.get_width()//2, int(H*0.35)))
-            screen.blit(timeoutB_surf, (right_x - timeoutB_surf.get_width()//2, int(H*0.75)))
-            screen.blit(foulB_surf, (right_x - foulB_surf.get_width()//2, int(H*0.85)))
+                # 우단: A팀 정보
+                right_x = W * 5 // 6
+                team_right = fontTeam.render(teamA_name, True, (220,220,220))
+                score_right_surf = fontScore.render(str(scoreA), True, (255,255,255))
+                timeout_right_surf = fontTimeout.render(f"Timeouts: {timeoutsA}", True, (180,180,220))
+                foul_right_surf = fontTimeout.render(f"Fouls: {foulsA}", True, (220,180,180))
+                
+                screen.blit(team_right, (right_x - team_right.get_width()//2, int(H*0.2)))
+                screen.blit(score_right_surf, (right_x - score_right_surf.get_width()//2, int(H*0.35)))
+                screen.blit(timeout_right_surf, (right_x - timeout_right_surf.get_width()//2, int(H*0.75)))
+                screen.blit(foul_right_surf, (right_x - foul_right_surf.get_width()//2, int(H*0.85)))
+            else:
+                # 기본 순서: A팀이 왼쪽, B팀이 오른쪽
+                # 좌단: A팀 정보
+                left_x = W // 6
+                teamA = fontTeam.render(teamA_name, True, (220,220,220))
+                scoreA_surf = fontScore.render(str(scoreA), True, (255,255,255))
+                timeoutA_surf = fontTimeout.render(f"Timeouts: {timeoutsA}", True, (180,180,220))
+                foulA_surf = fontTimeout.render(f"Fouls: {foulsA}", True, (220,180,180))
+                
+                screen.blit(teamA, (left_x - teamA.get_width()//2, int(H*0.2)))
+                screen.blit(scoreA_surf, (left_x - scoreA_surf.get_width()//2, int(H*0.35)))
+                screen.blit(timeoutA_surf, (left_x - timeoutA_surf.get_width()//2, int(H*0.75)))
+                screen.blit(foulA_surf, (left_x - foulA_surf.get_width()//2, int(H*0.85)))
+
+                # 우단: B팀 정보
+                right_x = W * 5 // 6
+                teamB = fontTeam.render(teamB_name, True, (220,220,220))
+                scoreB_surf = fontScore.render(str(scoreB), True, (255,255,255))
+                timeoutB_surf = fontTimeout.render(f"Timeouts: {timeoutsB}", True, (220,180,180))
+                foulB_surf = fontTimeout.render(f"Fouls: {foulsB}", True, (180,180,220))
+                
+                screen.blit(teamB, (right_x - teamB.get_width()//2, int(H*0.2)))
+                screen.blit(scoreB_surf, (right_x - scoreB_surf.get_width()//2, int(H*0.35)))
+                screen.blit(timeoutB_surf, (right_x - timeoutB_surf.get_width()//2, int(H*0.75)))
+                screen.blit(foulB_surf, (right_x - foulB_surf.get_width()//2, int(H*0.85)))
 
             # 중단: 시간/쿼터/샷클락
             center_x = W // 2
@@ -499,8 +793,12 @@ def main():
 
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
-                save_cfg(cfg); pygame.quit(); sys.exit(0)
-            if e.type == pygame.KEYDOWN:
+                save_cfg(cfg)
+                remove_dual_monitor_lock()  # 듀얼모니터 락 파일 정리
+                pygame.quit()
+                sys.exit(0)
+            if e.type == pygame.KEYDOWN and is_master_process():
+                # 보조 프로세스에서는 키 입력을 무시하고 동기화만 함
                 k = e.key
                 mod = pygame.key.get_mods()
 
@@ -530,6 +828,7 @@ def main():
                             elif confirm_event.type == pygame.KEYDOWN:
                                 if confirm_event.key == pygame.K_y or confirm_event.key == pygame.K_RETURN:
                                     save_cfg(cfg)
+                                    remove_dual_monitor_lock()  # 듀얼모니터 락 파일 정리
                                     pygame.quit()
                                     sys.exit(0)
                                 elif confirm_event.key == pygame.K_m:
@@ -638,7 +937,9 @@ def main():
                 elif k == pygame.K_PAGEDOWN:
                     game_seconds = max(0, game_seconds - 60)
                 elif k == pygame.K_t and (mod & pygame.KMOD_CTRL):
-                    swap_teams()
+                    # 팀 순서 바꾸기 (설정에 저장)
+                    cfg["team_swapped"] = not cfg.get("team_swapped", False)
+                    save_cfg(cfg)
                 elif k == pygame.K_LEFT:
                     game_seconds = max(0, game_seconds - 1)
                 elif k == pygame.K_RIGHT:
