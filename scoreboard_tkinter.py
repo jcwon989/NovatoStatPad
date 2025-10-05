@@ -244,6 +244,13 @@ class DualMonitorScoreboard:
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
         tk.Button(quarter_frame, text="쿼터 +1", command=lambda: self.adjust_period(1),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
+        
+        # 종료 버튼
+        exit_frame = tk.Frame(parent, bg='#1a1a1a')
+        exit_frame.pack(fill=tk.X, pady=(20, 0))
+        
+        tk.Button(exit_frame, text="종료 (Esc)", command=self.on_closing,
+                 font=self.font_small, bg='red', fg='white').pack(side=tk.RIGHT, padx=5)
     
     def create_hints(self, parent):
         """힌트 표시"""
@@ -253,7 +260,7 @@ class DualMonitorScoreboard:
         
         hints_text = """점수: 1/2/3(A팀 +1/+2/+3) | 0/9/8(B팀 +1/+2/+3) | `/-(A/B팀 -1)
 시간: 스페이스(게임시간) | S(샷클럭) | ←→(±1초) | ↑↓(±10초) | <>(±1분)
-게임: R(리셋) | [](쿼터 ±1) | Ctrl+T(팀 순서 바꾸기) | F2(설정)"""
+게임: R(리셋) | [](쿼터 ±1) | F2(설정) | Esc(종료)"""
         
         hints_label = tk.Label(hints_frame, text=hints_text, 
                               font=self.font_small, fg='gray', bg='#1a1a1a', justify=tk.LEFT)
@@ -362,8 +369,12 @@ class DualMonitorScoreboard:
         self.control_window.bind('<Key>', self.on_key_press)
         self.control_window.focus_set()
         
+        # 창 닫기 이벤트 바인딩
+        self.control_window.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
         if hasattr(self, 'presentation_window'):
             self.presentation_window.bind('<Key>', self.on_key_press)
+            self.presentation_window.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def on_key_press(self, event):
         """키보드 입력 처리"""
@@ -409,6 +420,8 @@ class DualMonitorScoreboard:
             self.adjust_period(1)
         elif key == 'F2':
             self.show_settings()
+        elif key == 'Escape':
+            self.on_closing()
     
     def update_score(self, team, points):
         """점수 업데이트"""
@@ -511,6 +524,13 @@ class DualMonitorScoreboard:
                 self.pres_shot_label.config(fg='red')
             else:
                 self.pres_shot_label.config(fg='orange')
+    
+    def on_closing(self):
+        """앱 종료 처리"""
+        self.timer_running = False
+        save_cfg(self.cfg)
+        self.root.quit()
+        self.root.destroy()
     
     def show_settings(self):
         """설정 창 표시"""
