@@ -615,6 +615,12 @@ def main():
         running_shot = False
 
     def render():
+        # 보조 프로세스인 경우 global 선언
+        if not is_master_process():
+            global scoreA, scoreB, period, timeoutsA, timeoutsB, foulsA, foulsB
+            global running_game, running_shot, game_seconds, shot_seconds
+            global teamA_name, teamB_name, hints_visible, last_korean_warning_at
+        
         screen.fill((17,17,17))
         
         # 메인 프로세스인 경우 현재 상태를 동기화 파일에 저장
@@ -642,9 +648,6 @@ def main():
             sync_data = load_sync_data()
             if sync_data:
                 # 동기화된 데이터로 렌더링에 사용할 변수 업데이트
-                global scoreA, scoreB, period, timeoutsA, timeoutsB, foulsA, foulsB
-                global running_game, running_shot, game_seconds, shot_seconds
-                global teamA_name, teamB_name, hints_visible, last_korean_warning_at
                 
                 scoreA = sync_data.get("scoreA", scoreA)
                 scoreB = sync_data.get("scoreB", scoreB)

@@ -125,7 +125,7 @@ class DualMonitorScoreboard:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # 제목
-        title_label = tk.Label(main_frame, text="BASKETBALL SCOREBOARD CONTROL", 
+        title_label = tk.Label(main_frame, text="NOVATO SCOREBOARD", 
                               font=self.font_large, fg='white', bg='#1a1a1a')
         title_label.pack(pady=(0, 20))
         
