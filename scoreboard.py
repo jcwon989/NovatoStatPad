@@ -421,8 +421,8 @@ class DualMonitorScoreboard:
         hints_frame.pack(fill=tk.X, pady=(10, 0))
         
         hints_text = """점수: 1/2/3(A팀 +1/+2/+3) | 0/9/8(B팀 +1/+2/+3) | `/-(A/B팀 -1)
-시간: 스페이스(게임시간) | s(샷클럭) | S(24초 리셋) | ←→(±1초) | ↑↓(±10초) | <>(±1분)
-타임아웃: t/y(A/B팀 -1) | T/Y(A/B팀 +1) | 파울: f/j(A/B팀 +1) | F/J(A/B팀 -1)
+시간: 스페이스(게임시간) | s(샷클럭 play/pause) | d(24초 리셋) | f(14초 리셋) | ←→(±1초) | ↑↓(±10초) | <>(±1분)
+홈팀(A): q/Q(타임아웃 -/+) | w/W(파울 +/-) | 원정팀(B): p/P(타임아웃 -/+) | o/O(파울 +/-)
 게임: R(리셋) | [](쿼터 ±1) | F2(설정) | F3(모니터 전환) | Esc(종료 확인)"""
         
         hints_label = tk.Label(hints_frame, text=hints_text, 
@@ -652,9 +652,11 @@ class DualMonitorScoreboard:
         elif key == 'space':
             self.toggle_game_time()
         elif key == 's':
-            self.toggle_shot_time()
-        elif key == 'S':
+            self.toggle_shot_time()  # 샷클럭 play/pause
+        elif key == 'd':
             self.reset_shot_clock()  # 24초 리셋
+        elif key == 'f':
+            self.reset_shot_clock_14()  # 14초 리셋
         elif key == 'r':
             self.reset_all()
         elif key == 'Left':
@@ -673,24 +675,23 @@ class DualMonitorScoreboard:
             self.adjust_period(-1)
         elif key == 'bracketright':  # ] 키
             self.adjust_period(1)
-        # 타임아웃 조작
-        elif key == 't':
-            self.update_timeout('A', -1)  # A팀 타임아웃 -1
-        elif key == 'y':
-            self.update_timeout('B', -1)  # B팀 타임아웃 -1
-        elif key == 'T':
-            self.update_timeout('A', 1)   # A팀 타임아웃 +1
-        elif key == 'Y':
-            self.update_timeout('B', 1)   # B팀 타임아웃 +1
-        # 파울 조작
-        elif key == 'f':
-            self.update_foul('A', 1)      # A팀 파울 +1
-        elif key == 'j':
-            self.update_foul('B', 1)      # B팀 파울 +1
-        elif key == 'F':
-            self.update_foul('A', -1)     # A팀 파울 -1
-        elif key == 'J':
-            self.update_foul('B', -1)     # B팀 파울 -1
+        # 타임아웃/파울 조작 (홈팀 A, 원정팀 B)
+        elif key == 'q':
+            self.update_timeout('A', -1)  # 홈팀 타임아웃 -1
+        elif key == 'Q':
+            self.update_timeout('A', 1)   # 홈팀 타임아웃 +1
+        elif key == 'w':
+            self.update_foul('A', 1)      # 홈팀 파울 +1
+        elif key == 'W':
+            self.update_foul('A', -1)     # 홈팀 파울 -1
+        elif key == 'p':
+            self.update_timeout('B', -1)  # 원정팀 타임아웃 -1
+        elif key == 'P':
+            self.update_timeout('B', 1)   # 원정팀 타임아웃 +1
+        elif key == 'o':
+            self.update_foul('B', 1)      # 원정팀 파울 +1
+        elif key == 'O':
+            self.update_foul('B', -1)     # 원정팀 파울 -1
         elif key == 'F2':
             self.show_settings()
         elif key == 'F3':
