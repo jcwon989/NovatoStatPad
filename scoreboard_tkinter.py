@@ -31,6 +31,7 @@ def load_cfg():
         "overtime_seconds": 5*60,
         "timeouts_per_team": 3,
         "dual_monitor": False,
+        "swap_monitors": False,  # 모니터 내용 전환 (조작용 ↔ 프레젠테이션)
         "monitor_index": 0,
         "team_swapped": False,
     }
@@ -113,10 +114,18 @@ class DualMonitorScoreboard:
         self.font_time = font.Font(family="Arial", size=36, weight="bold")
     
     def create_control_window(self):
-        """조작용 창 생성 (첫 번째 모니터)"""
+        """조작용 창 생성 (모니터 전환 기능 포함)"""
         self.control_window = tk.Toplevel(self.root)
         self.control_window.title("Basketball Scoreboard - Control")
-        self.control_window.geometry("900x700+0+0")  # 첫 번째 모니터
+        
+        # 모니터 전환에 따른 위치 설정
+        if self.cfg.get("swap_monitors", False):
+            # 전환 모드: 조작용 창을 두 번째 모니터에
+            self.control_window.geometry("900x700+1920+0")  # 두 번째 모니터 (1920은 일반적인 첫 번째 모니터 너비)
+        else:
+            # 기본 모드: 조작용 창을 첫 번째 모니터에
+            self.control_window.geometry("900x700+0+0")  # 첫 번째 모니터
+            
         self.control_window.configure(bg='#1a1a1a')
         self.control_window.resizable(False, False)
         
@@ -260,20 +269,25 @@ class DualMonitorScoreboard:
         
         hints_text = """점수: 1/2/3(A팀 +1/+2/+3) | 0/9/8(B팀 +1/+2/+3) | `/-(A/B팀 -1)
 시간: 스페이스(게임시간) | S(샷클럭) | ←→(±1초) | ↑↓(±10초) | <>(±1분)
-게임: R(리셋) | [](쿼터 ±1) | F2(설정) | Esc(종료)"""
+게임: R(리셋) | [](쿼터 ±1) | F2(설정) | F3(모니터 전환) | Esc(종료)"""
         
         hints_label = tk.Label(hints_frame, text=hints_text, 
                               font=self.font_small, fg='gray', bg='#1a1a1a', justify=tk.LEFT)
         hints_label.pack(anchor=tk.W)
     
     def create_presentation_window(self):
-        """프레젠테이션용 전체화면 창 생성 (두 번째 모니터)"""
+        """프레젠테이션용 전체화면 창 생성 (모니터 전환 기능 포함)"""
         self.presentation_window = tk.Toplevel(self.root)
         self.presentation_window.title("Basketball Scoreboard - Presentation")
         
-        # 두 번째 모니터에 배치 (첫 번째 모니터 너비만큼 오른쪽으로)
-        screen_width = self.root.winfo_screenwidth()
-        self.presentation_window.geometry(f"1920x1080+{screen_width}+0")
+        # 모니터 전환에 따른 위치 설정
+        if self.cfg.get("swap_monitors", False):
+            # 전환 모드: 프레젠테이션 창을 첫 번째 모니터에
+            self.presentation_window.geometry("1920x1080+0+0")  # 첫 번째 모니터
+        else:
+            # 기본 모드: 프레젠테이션 창을 두 번째 모니터에
+            screen_width = self.root.winfo_screenwidth()
+            self.presentation_window.geometry(f"1920x1080+{screen_width}+0")  # 두 번째 모니터
         
         self.presentation_window.configure(bg='#111111')
         self.presentation_window.attributes('-fullscreen', True)
@@ -420,6 +434,13 @@ class DualMonitorScoreboard:
             self.adjust_period(1)
         elif key == 'F2':
             self.show_settings()
+        elif key == 'F3':
+            # 모니터 전환 토글
+            self.cfg["swap_monitors"] = not self.cfg.get("swap_monitors", False)
+            save_cfg(self.cfg)
+            if hasattr(self, 'presentation_window') and self.cfg.get("dual_monitor", False):
+                self.presentation_window.destroy()
+                self.create_presentation_window()
         elif key == 'Escape':
             self.on_closing()
     
@@ -556,6 +577,11 @@ class DualMonitorScoreboard:
         tk.Checkbutton(settings_window, variable=dual_monitor_var, 
                       fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
         
+        tk.Label(settings_window, text="모니터 내용 전환 (1-2 ↔ 2-1):", fg='white', bg='#2a2a2a').pack(pady=5)
+        swap_monitors_var = tk.BooleanVar(value=self.cfg.get("swap_monitors", False))
+        tk.Checkbutton(settings_window, variable=swap_monitors_var, 
+                      fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
+        
         tk.Label(settings_window, text="팀 순서 바꾸기:", fg='white', bg='#2a2a2a').pack(pady=5)
         team_swapped_var = tk.BooleanVar(value=self.cfg.get("team_swapped", False))
         tk.Checkbutton(settings_window, variable=team_swapped_var, 
@@ -565,6 +591,7 @@ class DualMonitorScoreboard:
             self.cfg["teamA"] = team_a_entry.get()
             self.cfg["teamB"] = team_b_entry.get()
             self.cfg["dual_monitor"] = dual_monitor_var.get()
+            self.cfg["swap_monitors"] = swap_monitors_var.get()
             self.cfg["team_swapped"] = team_swapped_var.get()
             
             self.teamA_name = self.cfg["teamA"]
@@ -572,6 +599,12 @@ class DualMonitorScoreboard:
             
             save_cfg(self.cfg)
             self.update_displays()
+            
+            # 모니터 전환 설정이 변경된 경우 창을 다시 생성
+            if hasattr(self, 'presentation_window') and self.cfg.get("dual_monitor", False):
+                self.presentation_window.destroy()
+                self.create_presentation_window()
+            
             settings_window.destroy()
         
         tk.Button(settings_window, text="저장", command=save_settings, 
