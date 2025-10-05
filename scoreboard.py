@@ -7,6 +7,8 @@ import time
 import threading
 from datetime import datetime, timedelta
 import argparse
+from dotenv import load_dotenv
+from supabase import create_client, Client
 
 # ===== 기본 설정 =====
 PERIOD_MAX_DEFAULT = 4
@@ -14,6 +16,56 @@ GAME_SECONDS_DEFAULT = 10*60
 SHOT_SECONDS_DEFAULT = 24
 
 CONFIG_PATH = os.path.expanduser("~/.scoreboard_config.json")
+
+# Supabase 설정
+load_dotenv()
+SUPABASE_URL = os.getenv("APP_SUPABASE_URL")
+SUPABASE_KEY = os.getenv("APP_SUPABASE_ANON_KEY")
+
+def init_supabase_client():
+    """Supabase 클라이언트 초기화"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("경고: Supabase 설정이 없습니다. .env 파일을 확인하세요.")
+        return None
+    
+    try:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        return supabase
+    except Exception as e:
+        print(f"Supabase 클라이언트 초기화 실패: {e}, {SUPABASE_URL}, {SUPABASE_KEY}")
+        return None
+
+# generate_game_id 함수는 더 이상 사용하지 않음 (고정된 "pyscore" 사용)
+
+def update_live_score_to_supabase(supabase_client, game_id, score_data):
+    """Supabase에 라이브 스코어 업데이트"""
+    if not supabase_client:
+        return False
+    
+    try:
+        # upsert 사용하여 게임 데이터 업데이트/삽입
+        result = supabase_client.table('live_scores').upsert({
+            'game_id': game_id,
+            'team1_name': score_data['team1_name'],
+            'team2_name': score_data['team2_name'],
+            'team1_score': score_data['team1_score'],
+            'team2_score': score_data['team2_score'],
+            'team1_fouls': score_data['team1_fouls'],
+            'team2_fouls': score_data['team2_fouls'],
+            'team1_timeouts': score_data['team1_timeouts'],
+            'team2_timeouts': score_data['team2_timeouts'],
+            'current_quarter': score_data['current_quarter'],
+            'quarter_time': score_data['quarter_time'],
+            'game_status': score_data['game_status'],
+            # 'team1_color': score_data['team1_color'],  # 주석처리
+            # 'team2_color': score_data['team2_color'],  # 주석처리
+            'last_updated': datetime.now().isoformat()
+        }, on_conflict='game_id').execute()
+        
+        return True
+    except Exception as e:
+        print(f"Supabase 업데이트 실패: {e}")
+        return False
 
 def load_cfg():
     if os.path.exists(CONFIG_PATH):
@@ -70,6 +122,11 @@ class DualMonitorScoreboard:
     def __init__(self):
         self.cfg = load_cfg()
         
+        # Supabase 클라이언트 초기화
+        self.supabase_client = init_supabase_client()
+        self.game_id = "pyscore"  # 고정된 게임 ID
+        print(f"게임 ID: {self.game_id}")
+        
         # 게임 상태
         self.scoreA = 0
         self.scoreB = 0
@@ -82,6 +139,7 @@ class DualMonitorScoreboard:
         self.running_shot = False
         self.game_seconds = self.cfg["game_seconds"]
         self.shot_seconds = self.cfg["shot_seconds"]
+        self.game_status = "scheduled"
         
         # 팀 이름
         self.teamA_name = self.cfg["teamA"]
@@ -90,6 +148,10 @@ class DualMonitorScoreboard:
         # 타이머
         self.last_update = time.time()
         self.timer_running = True
+        
+        # Supabase 업데이트용 타이머
+        self.supabase_update_timer = time.time()
+        self.supabase_update_interval = 1.0  # 1초마다 업데이트
         
         # Tkinter 루트
         self.root = tk.Tk()
@@ -109,6 +171,55 @@ class DualMonitorScoreboard:
         
         # 키보드 바인딩
         self.setup_keyboard_bindings()
+        
+        # 초기 데이터를 Supabase에 전송
+        self.update_supabase_data()
+    
+    def get_color_hex(self, color_name):
+        """색상 이름을 hex 코드로 변환"""
+        color_map = {
+            "white": "#FFFFFF",
+            "red": "#FF0000", 
+            "blue": "#0000FF",
+            "yellow": "#FFFF00",
+            "green": "#00FF00",
+            "black": "#000000"
+        }
+        return color_map.get(color_name, "#FFFFFF")
+    
+    def get_score_data(self):
+        """현재 게임 상태를 딕셔너리로 반환"""
+        return {
+            'game_id': self.game_id,
+            'team1_name': self.teamA_name,
+            'team2_name': self.teamB_name,
+            'team1_score': self.scoreA,
+            'team2_score': self.scoreB,
+            'team1_fouls': self.foulsA,
+            'team2_fouls': self.foulsB,
+            'team1_timeouts': self.timeoutsA,
+            'team2_timeouts': self.timeoutsB,
+            'current_quarter': self.period,
+            'quarter_time': fmt_mmss(self.game_seconds),
+            'game_status': self.game_status,
+            'team1_color': self.get_color_hex(self.cfg.get("team_a_color", "white")),
+            'team2_color': self.get_color_hex(self.cfg.get("team_b_color", "blue"))
+        }
+    
+    def update_supabase_data(self):
+        """Supabase에 현재 게임 데이터 업데이트"""
+        if not self.supabase_client:
+            return
+        
+        try:
+            score_data = self.get_score_data()
+            success = update_live_score_to_supabase(self.supabase_client, self.game_id, score_data)
+            if success:
+                print(f"Supabase 업데이트 성공: {self.game_id}")
+            else:
+                print(f"Supabase 업데이트 실패: {self.game_id}")
+        except Exception as e:
+            print(f"Supabase 업데이트 중 오류: {e}")
     
     def setup_fonts(self):
         """폰트 설정"""
@@ -175,10 +286,17 @@ class DualMonitorScoreboard:
         main_frame = tk.Frame(self.control_window, bg='#1a1a1a')
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        # 제목 (우상단 로고 형태)
-        title_label = tk.Label(main_frame, text="NOVATO SCOREBOARD", 
+        # 제목과 게임 ID (우상단)
+        header_frame = tk.Frame(main_frame, bg='#1a1a1a')
+        header_frame.pack(anchor=tk.NE, pady=(10, 0))
+        
+        title_label = tk.Label(header_frame, text="NOVATO SCOREBOARD", 
                               font=self.font_small, fg='gray', bg='#1a1a1a')
-        title_label.pack(anchor=tk.NE, pady=(10, 0))
+        title_label.pack(anchor=tk.NE)
+        
+        game_id_label = tk.Label(header_frame, text=f"Game ID: {self.game_id}", 
+                                font=self.font_small, fg='lightblue', bg='#1a1a1a')
+        game_id_label.pack(anchor=tk.NE)
         
         # 스코어 표시 영역 (개선된 레이아웃)
         score_frame = tk.Frame(main_frame, bg='#1a1a1a')
@@ -711,6 +829,7 @@ class DualMonitorScoreboard:
         else:
             self.scoreB = max(0, self.scoreB + points)
         self.update_displays()
+        self.update_supabase_data()
     
     def update_timeout(self, team, change):
         """타임아웃 업데이트"""
@@ -719,6 +838,7 @@ class DualMonitorScoreboard:
         else:
             self.timeoutsB = max(0, self.timeoutsB + change)
         self.update_displays()
+        self.update_supabase_data()
     
     def update_foul(self, team, change):
         """파울 업데이트"""
@@ -727,43 +847,56 @@ class DualMonitorScoreboard:
         else:
             self.foulsB = max(0, self.foulsB + change)
         self.update_displays()
+        self.update_supabase_data()
     
     def toggle_game_time(self):
         """게임 시간 시작/정지"""
         self.running_game = not self.running_game
+        # 게임 상태 업데이트
+        if self.running_game:
+            self.game_status = "live"
+        else:
+            self.game_status = "paused"
         self.update_displays()
+        self.update_supabase_data()
     
     def toggle_shot_time(self):
         """샷 클럭 시작/정지"""
         self.running_shot = not self.running_shot
         self.update_displays()
+        self.update_supabase_data()
     
     def adjust_time(self, seconds):
         """시간 조정"""
         self.game_seconds = max(0, self.game_seconds + seconds)
         self.update_displays()
+        self.update_supabase_data()
     
     def adjust_period(self, delta):
         """쿼터 조정"""
         self.period = max(1, min(self.cfg.get("period_max", 4), self.period + delta))
         self.update_displays()
+        self.update_supabase_data()
     
     def adjust_shot_time(self, delta):
         """샷클럭 시간 조정"""
         self.shot_seconds = max(0, min(99, self.shot_seconds + delta))
         self.update_displays()
+        self.update_supabase_data()
     
     def reset_shot_clock_14(self):
         """샷클럭 14초 리셋"""
         self.shot_seconds = 14
         self.running_shot = False
         self.update_displays()
+        self.update_supabase_data()
     
     def reset_shot_clock(self):
         """샷클럭 24초 리셋"""
         self.shot_seconds = 24
         self.running_shot = False
         self.update_displays()
+        self.update_supabase_data()
     
     def reset_all(self):
         """전체 리셋"""
@@ -778,7 +911,9 @@ class DualMonitorScoreboard:
         self.running_shot = False
         self.game_seconds = self.cfg["game_seconds"]
         self.shot_seconds = self.cfg["shot_seconds"]
+        self.game_status = "scheduled"
         self.update_displays()
+        self.update_supabase_data()
     
     def start_timer(self):
         """타이머 시작"""
@@ -798,6 +933,11 @@ class DualMonitorScoreboard:
                 
                 # UI 업데이트 (메인 스레드에서)
                 self.root.after(0, self.update_displays)
+                
+                # 1초마다 Supabase 업데이트
+                if current_time - self.supabase_update_timer >= self.supabase_update_interval:
+                    self.supabase_update_timer = current_time
+                    self.root.after(0, self.update_supabase_data)
                 
                 time.sleep(1/60)  # 60 FPS
         
@@ -1022,6 +1162,7 @@ class DualMonitorScoreboard:
             
             save_cfg(self.cfg)
             self.update_displays()
+            self.update_supabase_data()
             
             # 모니터 전환 설정이나 팀 컬러가 변경된 경우 창을 다시 생성
             if hasattr(self, 'presentation_window') and self.cfg.get("dual_monitor", False):
