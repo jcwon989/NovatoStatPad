@@ -1,8 +1,8 @@
-# Pygame 버전 (기존)
-pygame>=2.0.0
-numpy>=1.21.0
-supabase>=2.0.0
-python-dotenv>=1.0.0
-
-# Tkinter 버전 (새로운 듀얼모니터 지원)
+# Basketball Scoreboard - Tkinter 버전
 # Tkinter는 Python 기본 내장이므로 추가 설치 불필요
+
+# 선택적 의존성 (필요시에만 설치)
+# pygame>=2.0.0  # 백업 버전용 (scoreboard_pygame_backup.py)
+# numpy>=1.21.0  # 백업 버전용
+# supabase>=2.0.0  # 백업 버전용
+# python-dotenv>=1.0.0  # 백업 버전용
