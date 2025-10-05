@@ -57,6 +57,7 @@ def update_live_score_to_supabase(supabase_client, game_id, score_data):
             'current_quarter': score_data['current_quarter'],
             'quarter_time': score_data['quarter_time'],
             'game_status': score_data['game_status'],
+            'shot_clock': int(score_data['shot_clock']),  # 24초 필드 추가
             # 'team1_color': score_data['team1_color'],  # 주석처리
             # 'team2_color': score_data['team2_color'],  # 주석처리
             'last_updated': datetime.now().isoformat()
@@ -202,6 +203,7 @@ class DualMonitorScoreboard:
             'current_quarter': self.period,
             'quarter_time': fmt_mmss(self.game_seconds),
             'game_status': self.game_status,
+            'shot_clock': int(self.shot_seconds),  # 24초 필드 추가
             'team1_color': self.get_color_hex(self.cfg.get("team_a_color", "white")),
             'team2_color': self.get_color_hex(self.cfg.get("team_b_color", "blue"))
         }
