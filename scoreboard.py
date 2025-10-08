@@ -153,6 +153,7 @@ class DualMonitorScoreboard:
         # Supabase 업데이트용 타이머
         self.supabase_update_timer = time.time()
         self.supabase_update_interval = 1.0  # 1초마다 업데이트
+        self.last_score_data = None  # 이전 데이터 저장용
         
         # Tkinter 루트
         self.root = tk.Tk()
@@ -209,17 +210,23 @@ class DualMonitorScoreboard:
         }
     
     def update_supabase_data(self):
-        """Supabase에 현재 게임 데이터 업데이트"""
+        """Supabase에 현재 게임 데이터 업데이트 (변경사항이 있을 때만)"""
         if not self.supabase_client:
             return
         
         try:
             score_data = self.get_score_data()
-            success = update_live_score_to_supabase(self.supabase_client, self.game_id, score_data)
-            if success:
-                print(f"Supabase 업데이트 성공: {self.game_id}")
-            else:
-                print(f"Supabase 업데이트 실패: {self.game_id}")
+            
+            # 이전 데이터와 비교 (변경사항이 있을 때만 업데이트)
+            if self.last_score_data != score_data:
+                success = update_live_score_to_supabase(self.supabase_client, self.game_id, score_data)
+                if success:
+                    print(f"Supabase 업데이트 성공: {self.game_id}")
+                    self.last_score_data = score_data.copy()
+                else:
+                    print(f"Supabase 업데이트 실패: {self.game_id}")
+            # else:
+            #     print(f"변경사항 없음, 업데이트 스킵: {self.game_id}")  # 디버깅용 (필요시 주석 해제)
         except Exception as e:
             print(f"Supabase 업데이트 중 오류: {e}")
     
@@ -416,13 +423,13 @@ class DualMonitorScoreboard:
                                     font=self.font_small, fg='lightblue', bg='#1a1a1a')
         a_team_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
         
-        tk.Button(a_team_frame, text="+1", command=lambda: self.update_score('A', 1),
+        tk.Button(a_team_frame, text="+1 (1)", command=lambda: self.update_score('A', 1),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
-        tk.Button(a_team_frame, text="+2", command=lambda: self.update_score('A', 2),
+        tk.Button(a_team_frame, text="+2 (2)", command=lambda: self.update_score('A', 2),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
-        tk.Button(a_team_frame, text="+3", command=lambda: self.update_score('A', 3),
+        tk.Button(a_team_frame, text="+3 (3)", command=lambda: self.update_score('A', 3),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
-        tk.Button(a_team_frame, text="-1", command=lambda: self.update_score('A', -1),
+        tk.Button(a_team_frame, text="-1 (`)", command=lambda: self.update_score('A', -1),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
         
         # B팀 점수
@@ -430,13 +437,13 @@ class DualMonitorScoreboard:
                                     font=self.font_small, fg='lightcoral', bg='#1a1a1a')
         b_team_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
         
-        tk.Button(b_team_frame, text="+1", command=lambda: self.update_score('B', 1),
+        tk.Button(b_team_frame, text="+1 (0)", command=lambda: self.update_score('B', 1),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
-        tk.Button(b_team_frame, text="+2", command=lambda: self.update_score('B', 2),
+        tk.Button(b_team_frame, text="+2 (9)", command=lambda: self.update_score('B', 2),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
-        tk.Button(b_team_frame, text="+3", command=lambda: self.update_score('B', 3),
+        tk.Button(b_team_frame, text="+3 (8)", command=lambda: self.update_score('B', 3),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
-        tk.Button(b_team_frame, text="-1", command=lambda: self.update_score('B', -1),
+        tk.Button(b_team_frame, text="-1 (-)", command=lambda: self.update_score('B', -1),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
         
         
@@ -449,13 +456,13 @@ class DualMonitorScoreboard:
                                        font=self.font_small, fg='lightblue', bg='#1a1a1a')
         a_control_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         
-        tk.Button(a_control_frame, text="타임아웃 +1", command=lambda: self.update_timeout('A', 1),
+        tk.Button(a_control_frame, text="타임아웃 +1 (Q)", command=lambda: self.update_timeout('A', 1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(a_control_frame, text="타임아웃 -1", command=lambda: self.update_timeout('A', -1),
+        tk.Button(a_control_frame, text="타임아웃 -1 (q)", command=lambda: self.update_timeout('A', -1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(a_control_frame, text="파울 +1", command=lambda: self.update_foul('A', 1),
+        tk.Button(a_control_frame, text="파울 +1 (w)", command=lambda: self.update_foul('A', 1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(a_control_frame, text="파울 -1", command=lambda: self.update_foul('A', -1),
+        tk.Button(a_control_frame, text="파울 -1 (W)", command=lambda: self.update_foul('A', -1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
         
         # B팀 제어
@@ -463,34 +470,34 @@ class DualMonitorScoreboard:
                                        font=self.font_small, fg='lightcoral', bg='#1a1a1a')
         b_control_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
         
-        tk.Button(b_control_frame, text="타임아웃 +1", command=lambda: self.update_timeout('B', 1),
+        tk.Button(b_control_frame, text="타임아웃 +1 P", command=lambda: self.update_timeout('B', 1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(b_control_frame, text="타임아웃 -1", command=lambda: self.update_timeout('B', -1),
+        tk.Button(b_control_frame, text="타임아웃 -1 p", command=lambda: self.update_timeout('B', -1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(b_control_frame, text="파울 +1", command=lambda: self.update_foul('B', 1),
+        tk.Button(b_control_frame, text="파울 +1 o", command=lambda: self.update_foul('B', 1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(b_control_frame, text="파울 -1", command=lambda: self.update_foul('B', -1),
+        tk.Button(b_control_frame, text="파울 -1 O", command=lambda: self.update_foul('B', -1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
         
         # 시간 조작 버튼들 (첫 번째 줄)
         time_buttons_frame = tk.Frame(parent, bg='#1a1a1a')
         time_buttons_frame.pack(fill=tk.X, pady=(0, 5))
         
-        tk.Button(time_buttons_frame, text="+1초", command=lambda: self.adjust_time(1),
+        tk.Button(time_buttons_frame, text="+1초 (→)", command=lambda: self.adjust_time(1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(time_buttons_frame, text="-1초", command=lambda: self.adjust_time(-1),
+        tk.Button(time_buttons_frame, text="-1초 (←)", command=lambda: self.adjust_time(-1),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(time_buttons_frame, text="+10초", command=lambda: self.adjust_time(10),
+        tk.Button(time_buttons_frame, text="+10초 (↑)", command=lambda: self.adjust_time(10),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(time_buttons_frame, text="-10초", command=lambda: self.adjust_time(-10),
+        tk.Button(time_buttons_frame, text="-10초 (↓)", command=lambda: self.adjust_time(-10),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(time_buttons_frame, text="+1분", command=lambda: self.adjust_time(60),
+        tk.Button(time_buttons_frame, text="+1분 (>)", command=lambda: self.adjust_time(60),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
-        tk.Button(time_buttons_frame, text="-1분", command=lambda: self.adjust_time(-60),
+        tk.Button(time_buttons_frame, text="-1분 (<)", command=lambda: self.adjust_time(-60),
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
         
         # 게임시간 play/pause 버튼 (오른쪽 끝)
-        self.game_time_button = tk.Button(time_buttons_frame, text="시간 ▶", 
+        self.game_time_button = tk.Button(time_buttons_frame, text="시간 ▶ (Space)", 
                                          command=self.toggle_game_time, 
                                          font=self.font_small, fg='red')
         self.game_time_button.pack(side=tk.RIGHT, padx=5)
@@ -509,13 +516,13 @@ class DualMonitorScoreboard:
                  font=self.font_small).pack(side=tk.LEFT, padx=2)
         
         # 14초, 24초 버튼 (샷클럭 버튼 왼쪽에 붙여서)
-        tk.Button(shot_buttons_frame, text="14초", command=self.reset_shot_clock_14,
+        tk.Button(shot_buttons_frame, text="14초 (f)", command=self.reset_shot_clock_14,
                  font=self.font_small).pack(side=tk.RIGHT, padx=(5, 2))
-        tk.Button(shot_buttons_frame, text="24초", command=self.reset_shot_clock,
+        tk.Button(shot_buttons_frame, text="24초 (d)", command=self.reset_shot_clock,
                  font=self.font_small).pack(side=tk.RIGHT, padx=2)
         
         # 샷클럭 play/pause 버튼 (오른쪽 끝)
-        self.shot_clock_button = tk.Button(shot_buttons_frame, text="샷클럭 ▶", 
+        self.shot_clock_button = tk.Button(shot_buttons_frame, text="샷클럭 ▶ (s)", 
                                           command=self.toggle_shot_time, 
                                           font=self.font_small, fg='orange')
         self.shot_clock_button.pack(side=tk.RIGHT, padx=5)
@@ -524,14 +531,22 @@ class DualMonitorScoreboard:
         other_buttons_frame = tk.Frame(parent, bg='#1a1a1a')
         other_buttons_frame.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Button(other_buttons_frame, text="전체 리셋", 
+        tk.Button(other_buttons_frame, text="전체 리셋 (r)", 
                  command=self.reset_all, font=self.font_small).pack(side=tk.LEFT, padx=5)
         
         # 쿼터 조작 (전체 리셋 옆에 배치)
-        tk.Button(other_buttons_frame, text="쿼터 -1", command=lambda: self.adjust_period(-1),
+        tk.Button(other_buttons_frame, text="쿼터 -1 ([)", command=lambda: self.adjust_period(-1),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
-        tk.Button(other_buttons_frame, text="쿼터 +1", command=lambda: self.adjust_period(1),
+        tk.Button(other_buttons_frame, text="쿼터 +1 (])", command=lambda: self.adjust_period(1),
                  font=self.font_small).pack(side=tk.LEFT, padx=5)
+        
+        # 설정 버튼 (쿼터 버튼 옆)
+        tk.Button(other_buttons_frame, text="설정 (F2)", 
+                 command=self.show_settings, font=self.font_small).pack(side=tk.LEFT, padx=5)
+        
+        # 종료 버튼 (설정 버튼 옆)
+        tk.Button(other_buttons_frame, text="종료 (Esc)", 
+                 command=self.on_closing, font=self.font_small, fg='red').pack(side=tk.LEFT, padx=5)
         
     
     def create_hints(self, parent):
@@ -965,16 +980,16 @@ class DualMonitorScoreboard:
         # 게임시간 버튼 상태 업데이트
         if hasattr(self, 'game_time_button'):
             if self.running_game:
-                self.game_time_button.config(text="시간 ⏸", fg='darkred')
-        else:
-                self.game_time_button.config(text="시간 ▶", fg='red')
+                self.game_time_button.config(text="시간 ⏸ (Space)", fg='darkred')
+            else:
+                self.game_time_button.config(text="시간 ▶ (Space)", fg='red')
         
         # 샷클럭 버튼 상태 업데이트
         if hasattr(self, 'shot_clock_button'):
             if self.running_shot:
-                self.shot_clock_button.config(text="샷클럭 ⏸", fg='darkorange')
-        else:
-                self.shot_clock_button.config(text="샷클럭 ▶", fg='orange')
+                self.shot_clock_button.config(text="샷클럭 ⏸ (s)", fg='darkorange')
+            else:
+                self.shot_clock_button.config(text="샷클럭 ▶ (s)", fg='orange')
         
         # 프레젠테이션 창 업데이트
         if hasattr(self, 'presentation_window'):
@@ -1174,6 +1189,9 @@ class DualMonitorScoreboard:
             # 컨트롤 창도 다시 생성 (팀 컬러 동기화)
             self.control_window.destroy()
             self.create_control_window()
+            
+            # 키보드 바인딩 다시 설정 (창 재생성 후 필수!)
+            self.setup_keyboard_bindings()
             
             settings_window.destroy()
         
