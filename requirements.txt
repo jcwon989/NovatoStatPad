@@ -4,6 +4,7 @@
 # 필수 의존성 (Supabase Realtime 기능용)
 supabase>=2.0.0
 python-dotenv>=1.0.0
+pygame>=2.0.0  # 사운드 재생용
 
 # 선택적 의존성 (필요시에만 설치)
 # pygame>=2.0.0  # 백업 버전용 (scoreboard_pygame_backup.py)

@@ -10,6 +10,7 @@ import argparse
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from database import get_database
+import pygame  # 사운드 재생용
 
 # ===== 기본 설정 =====
 PERIOD_MAX_DEFAULT = 4
@@ -99,8 +100,8 @@ def load_cfg():
         "game_minutes": 9,  # 게임 시간 (분)
         "timeout_count": 3,  # 타임아웃 갯수
         "overtime_minutes": 5,  # 연장전 시간 (분)
-        "team_a_color": "white",  # A팀 컬러
-        "team_b_color": "blue",  # B팀 컬러
+        "team_a_color": "#F4F4F4",  # A팀 컬러 (흰색)
+        "team_b_color": "#2563EB",  # B팀 컬러 (파랑)
     }
 
 def save_cfg(cfg):
@@ -215,7 +216,79 @@ def show_game_selection_dialog():
     # 엔터 키로 선택
     listbox.bind('<Return>', lambda e: on_select())
     
-    # 화살표 키는 기본적으로 작동하지만, 명시적으로 포커스 설정
+    # 마우스 휠로 선택 이동
+    def on_mousewheel(event):
+        # 먼저 스크롤 처리
+        if event.delta:
+            # macOS/Windows
+            delta = event.delta
+            if abs(delta) >= 120:
+                # Windows
+                scroll_amount = -1 if delta > 0 else 1
+            else:
+                # macOS
+                scroll_amount = -1 if delta > 0 else 1
+        else:
+            # Linux
+            scroll_amount = -1 if event.num == 4 else 1
+        
+        # 현재 선택 항목 가져오기
+        current = listbox.curselection()
+        if current:
+            current_idx = current[0]
+        else:
+            current_idx = 0
+        
+        # 새로운 인덱스 계산
+        new_idx = current_idx + scroll_amount
+        
+        # 범위 체크
+        if 0 <= new_idx < listbox.size():
+            # 선택 해제 후 새로 선택
+            listbox.selection_clear(0, tk.END)
+            listbox.selection_set(new_idx)
+            listbox.activate(new_idx)
+            # 보이도록 스크롤
+            listbox.see(new_idx)
+        
+        return "break"  # 기본 스크롤 동작 방지
+    
+    listbox.bind("<MouseWheel>", on_mousewheel)  # Windows/macOS
+    listbox.bind("<Button-4>", on_mousewheel)    # Linux 스크롤 업
+    listbox.bind("<Button-5>", on_mousewheel)    # Linux 스크롤 다운
+    
+    # 키보드 화살표 키로 선택 이동
+    def on_arrow_key(event):
+        # 현재 선택 항목 가져오기
+        current = listbox.curselection()
+        if current:
+            current_idx = current[0]
+        else:
+            current_idx = 0
+        
+        # 화살표 키에 따라 이동
+        if event.keysym == 'Up':
+            new_idx = current_idx - 1
+        elif event.keysym == 'Down':
+            new_idx = current_idx + 1
+        else:
+            return
+        
+        # 범위 체크
+        if 0 <= new_idx < listbox.size():
+            # 선택 해제 후 새로 선택
+            listbox.selection_clear(0, tk.END)
+            listbox.selection_set(new_idx)
+            listbox.activate(new_idx)
+            # 보이도록 스크롤
+            listbox.see(new_idx)
+        
+        return "break"  # 기본 동작 방지 (중복 스크롤 방지)
+    
+    listbox.bind("<Up>", on_arrow_key)
+    listbox.bind("<Down>", on_arrow_key)
+    
+    # 포커스 설정
     listbox.focus_set()
     
     dialog.mainloop()
@@ -230,6 +303,9 @@ class DualMonitorScoreboard:
         self.supabase_client = init_supabase_client()
         self.game_id = "pyscore"  # 고정된 게임 ID
         print(f"게임 ID: {self.game_id}")
+        
+        # 게임 유형 저장 (서버 게임 vs 바로 시작)
+        self.is_quick_start = (selected_game is None)
         
         # 선택된 게임 데이터로 초기화
         if selected_game:
@@ -253,6 +329,20 @@ class DualMonitorScoreboard:
         self.supabase_update_timer = time.time()
         self.supabase_update_interval = 1.0  # 1초마다 업데이트
         self.last_score_data = None  # 이전 데이터 저장용
+        
+        # 사운드 재생 플래그 (중복 재생 방지)
+        self.game_buzzer_played = False
+        self.shot_buzzer_played = False
+        
+        # pygame 사운드 초기화
+        try:
+            pygame.mixer.init()
+            buzzer_path = os.path.join(os.path.dirname(__file__), "sound", "buzzer_main.wav")
+            self.buzzer_sound = pygame.mixer.Sound(buzzer_path)
+            print(f"버저 사운드 로드 성공: {buzzer_path}")
+        except Exception as e:
+            print(f"사운드 초기화 실패: {e}")
+            self.buzzer_sound = None
         
         # Tkinter 루트
         self.root = tk.Tk()
@@ -357,28 +447,29 @@ class DualMonitorScoreboard:
     def get_color_hex(self, color_value):
         """색상 값을 hex 코드로 변환"""
         if not color_value:
-            return "#FFFFFF"
+            return "#F4F4F4"  # 기본값: 흰색
         
         # 이미 hex 코드인 경우 (#로 시작)
         if isinstance(color_value, str) and color_value.startswith('#'):
             return color_value
         
-        # 색상 이름인 경우 hex로 변환
+        # 색상 이름인 경우 hex로 변환 (하위 호환성)
         color_map = {
-            "white": "#FFFFFF",
-            "red": "#FF0000", 
-            "blue": "#0000FF",
-            "yellow": "#FFFF00",
-            "green": "#00FF00",
-            "black": "#000000"
+            "white": "#F4F4F4",
+            "red": "#EF4444", 
+            "blue": "#2563EB",
+            "yellow": "#FACC15",
+            "green": "#22C55E",
+            "lightgreen": "#22C55E",
+            "black": "#222222"
         }
-        return color_map.get(color_value, "#FFFFFF")
+        return color_map.get(color_value, "#F4F4F4")
     
     def get_score_data(self):
         """현재 게임 상태를 딕셔너리로 반환"""
         # game_league에서 가져온 팀 컬러 사용 (없으면 기본값)
-        team1_color_value = getattr(self, 'team1_color', None) or self.cfg.get("team_a_color", "white")
-        team2_color_value = getattr(self, 'team2_color', None) or self.cfg.get("team_b_color", "blue")
+        team1_color_value = getattr(self, 'team1_color', None) or self.cfg.get("team_a_color", "#F4F4F4")
+        team2_color_value = getattr(self, 'team2_color', None) or self.cfg.get("team_b_color", "#2563EB")
         
         data = {
             'game_id': self.game_id,
@@ -1063,12 +1154,7 @@ class DualMonitorScoreboard:
         elif key == 'F2':
             self.show_settings()
         elif key == 'F3':
-            # 모니터 전환 토글
-            self.cfg["swap_monitors"] = not self.cfg.get("swap_monitors", False)
-            save_cfg(self.cfg)
-            if hasattr(self, 'presentation_window') and self.cfg.get("dual_monitor", False):
-                self.presentation_window.destroy()
-                self.create_presentation_window()
+            self.toggle_monitor_swap()
         elif key == 'Escape':
             self.on_closing()
     
@@ -1119,6 +1205,9 @@ class DualMonitorScoreboard:
     def adjust_time(self, seconds):
         """시간 조정"""
         self.game_seconds = max(0, self.game_seconds + seconds)
+        # 시간이 0보다 크면 버저 플래그 리셋
+        if self.game_seconds > 0:
+            self.game_buzzer_played = False
         self.update_displays()
         self.update_supabase_data()
     
@@ -1131,6 +1220,9 @@ class DualMonitorScoreboard:
     def adjust_shot_time(self, delta):
         """샷클럭 시간 조정"""
         self.shot_seconds = max(0, min(99, self.shot_seconds + delta))
+        # 샷 클럭이 0보다 크면 버저 플래그 리셋
+        if self.shot_seconds > 0:
+            self.shot_buzzer_played = False
         self.update_displays()
         self.update_supabase_data()
     
@@ -1138,6 +1230,7 @@ class DualMonitorScoreboard:
         """샷클럭 14초 리셋"""
         self.shot_seconds = 14
         self.running_shot = False
+        self.shot_buzzer_played = False  # 버저 플래그 리셋
         self.update_displays()
         self.update_supabase_data()
     
@@ -1145,6 +1238,7 @@ class DualMonitorScoreboard:
         """샷클럭 24초 리셋"""
         self.shot_seconds = 24
         self.running_shot = False
+        self.shot_buzzer_played = False  # 버저 플래그 리셋
         self.update_displays()
         self.update_supabase_data()
     
@@ -1162,6 +1256,9 @@ class DualMonitorScoreboard:
         self.game_seconds = self.cfg["game_seconds"]
         self.shot_seconds = self.cfg["shot_seconds"]
         self.game_status = "scheduled"
+        # 버저 플래그 리셋
+        self.game_buzzer_played = False
+        self.shot_buzzer_played = False
         self.update_displays()
         self.update_supabase_data()
     
@@ -1175,11 +1272,33 @@ class DualMonitorScoreboard:
                 
                 # 게임 시간 업데이트
                 if self.running_game and self.game_seconds > 0:
+                    prev_game_seconds = self.game_seconds
                     self.game_seconds = max(0, self.game_seconds - dt)
+                    
+                    # 게임 시간이 0이 되는 순간 버저 재생
+                    if prev_game_seconds > 0 and self.game_seconds == 0:
+                        if self.buzzer_sound and not self.game_buzzer_played:
+                            try:
+                                self.buzzer_sound.play()
+                                self.game_buzzer_played = True
+                                print("게임 시간 종료 - 버저 재생")
+                            except Exception as e:
+                                print(f"버저 재생 실패: {e}")
                 
                 # 샷 클럭 업데이트
                 if self.running_shot and self.shot_seconds > 0:
+                    prev_shot_seconds = self.shot_seconds
                     self.shot_seconds = max(0, self.shot_seconds - dt)
+                    
+                    # 샷 클럭이 0이 되는 순간 버저 재생
+                    if prev_shot_seconds > 0 and self.shot_seconds == 0:
+                        if self.buzzer_sound and not self.shot_buzzer_played:
+                            try:
+                                self.buzzer_sound.play()
+                                self.shot_buzzer_played = True
+                                print("샷 클럭 종료 - 버저 재생")
+                            except Exception as e:
+                                print(f"버저 재생 실패: {e}")
                 
                 # UI 업데이트 (메인 스레드에서)
                 self.root.after(0, self.update_displays)
@@ -1309,10 +1428,10 @@ class DualMonitorScoreboard:
             self.root.destroy()
     
     def show_settings(self):
-        """설정 창 표시 (작은 화면용)"""
+        """설정 창 표시 (개선된 레이아웃)"""
         settings_window = tk.Toplevel(self.root)
         settings_window.title("게임 설정")
-        settings_window.geometry("520x600")  # 스크롤바 공간 확보
+        settings_window.geometry("700x650")
         settings_window.configure(bg='#2a2a2a')
         settings_window.resizable(True, True)
         
@@ -1337,102 +1456,170 @@ class DualMonitorScoreboard:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # 설정 항목들 (스크롤 가능한 프레임 안에)
-        tk.Label(scrollable_frame, text="A팀 이름:", fg='white', bg='#2a2a2a').pack(pady=5)
-        team_a_entry = tk.Entry(scrollable_frame, font=self.font_small)
-        team_a_entry.pack(pady=5)
+        # ===== 팀 설정 (좌우 배치) =====
+        teams_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
+        teams_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        # A팀 설정 (왼쪽)
+        team_a_frame = tk.LabelFrame(teams_frame, text="A팀 설정", 
+                                     font=self.font_small, fg='lightblue', bg='#2a2a2a')
+        team_a_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        
+        tk.Label(team_a_frame, text="팀 이름:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+        team_a_entry = tk.Entry(team_a_frame, font=self.font_small)
+        team_a_entry.pack(pady=5, padx=10)
         team_a_entry.insert(0, self.cfg["teamA"])
         
-        tk.Label(scrollable_frame, text="B팀 이름:", fg='white', bg='#2a2a2a').pack(pady=5)
-        team_b_entry = tk.Entry(scrollable_frame, font=self.font_small)
-        team_b_entry.pack(pady=5)
+        # A팀 컬러
+        team_a_color_var = None
+        colors = ["#F4F4F4", "#2563EB", "#EF4444", "#FACC15", "#222222", "#22C55E"]
+        color_names = ["흰색", "파랑", "빨강", "노랑", "검정", "녹색"]
+        color_map = dict(zip(colors, color_names))
+        
+        if self.is_quick_start:
+            # 바로 시작: 라디오 버튼으로 선택 가능
+            tk.Label(team_a_frame, text="팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+            team_a_color_var = tk.StringVar(value=self.cfg.get("team_a_color", "#F4F4F4"))
+            
+            # 3개씩 2줄로 표시
+            color_row1 = tk.Frame(team_a_frame, bg='#2a2a2a')
+            color_row1.pack(padx=10, pady=2)
+            for i in range(3):
+                tk.Radiobutton(color_row1, text=color_names[i], variable=team_a_color_var, 
+                              value=colors[i], fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+            
+            color_row2 = tk.Frame(team_a_frame, bg='#2a2a2a')
+            color_row2.pack(padx=10, pady=2)
+            for i in range(3, 6):
+                tk.Radiobutton(color_row2, text=color_names[i], variable=team_a_color_var, 
+                              value=colors[i], fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+        else:
+            # 서버 게임: 읽기 전용으로 컬러 표시
+            tk.Label(team_a_frame, text="팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+            team_a_color = getattr(self, 'team1_color', None) or self.cfg.get("team_a_color", "#F4F4F4")
+            # 팔레트에 있으면 이름, 없으면 hex 코드 표시
+            color_display = color_map.get(team_a_color, team_a_color)
+            tk.Label(team_a_frame, text=color_display, fg='lightblue', bg='#2a2a2a',
+                    font=self.font_small).pack(pady=5)
+        
+        # B팀 설정 (오른쪽)
+        team_b_frame = tk.LabelFrame(teams_frame, text="B팀 설정", 
+                                     font=self.font_small, fg='lightcoral', bg='#2a2a2a')
+        team_b_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
+        
+        tk.Label(team_b_frame, text="팀 이름:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+        team_b_entry = tk.Entry(team_b_frame, font=self.font_small)
+        team_b_entry.pack(pady=5, padx=10)
         team_b_entry.insert(0, self.cfg["teamB"])
         
-        tk.Label(scrollable_frame, text="듀얼모니터:", fg='white', bg='#2a2a2a').pack(pady=5)
-        dual_monitor_var = tk.BooleanVar(value=self.cfg.get("dual_monitor", False))
-        tk.Checkbutton(scrollable_frame, variable=dual_monitor_var, 
-                      fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
-        
-        tk.Label(scrollable_frame, text="모니터 내용 전환 (1-2 ↔ 2-1):", fg='white', bg='#2a2a2a').pack(pady=5)
-        swap_monitors_var = tk.BooleanVar(value=self.cfg.get("swap_monitors", False))
-        tk.Checkbutton(scrollable_frame, variable=swap_monitors_var, 
-                      fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
-        
-        tk.Label(scrollable_frame, text="팀 순서 바꾸기:", fg='white', bg='#2a2a2a').pack(pady=5)
-        team_swapped_var = tk.BooleanVar(value=self.cfg.get("team_swapped", False))
-        tk.Checkbutton(scrollable_frame, variable=team_swapped_var, 
-                      fg='white', bg='#2a2a2a', selectcolor='#444444').pack()
+        # B팀 컬러
+        team_b_color_var = None
+        if self.is_quick_start:
+            # 바로 시작: 라디오 버튼으로 선택 가능
+            tk.Label(team_b_frame, text="팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+            team_b_color_var = tk.StringVar(value=self.cfg.get("team_b_color", "#2563EB"))
+            
+            # 3개씩 2줄로 표시
+            color_row1 = tk.Frame(team_b_frame, bg='#2a2a2a')
+            color_row1.pack(padx=10, pady=2)
+            for i in range(3):
+                tk.Radiobutton(color_row1, text=color_names[i], variable=team_b_color_var, 
+                              value=colors[i], fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+            
+            color_row2 = tk.Frame(team_b_frame, bg='#2a2a2a')
+            color_row2.pack(padx=10, pady=2)
+            for i in range(3, 6):
+                tk.Radiobutton(color_row2, text=color_names[i], variable=team_b_color_var, 
+                              value=colors[i], fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+        else:
+            # 서버 게임: 읽기 전용으로 컬러 표시
+            tk.Label(team_b_frame, text="팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+            team_b_color = getattr(self, 'team2_color', None) or self.cfg.get("team_b_color", "#2563EB")
+            # 팔레트에 있으면 이름, 없으면 hex 코드 표시
+            color_display = color_map.get(team_b_color, team_b_color)
+            tk.Label(team_b_frame, text=color_display, fg='lightcoral', bg='#2a2a2a',
+                    font=self.font_small).pack(pady=5)
         
         # 구분선
-        tk.Label(scrollable_frame, text="─────────────────────", fg='gray', bg='#2a2a2a').pack(pady=10)
+        tk.Label(scrollable_frame, text="─────────────────────────────────────", fg='gray', bg='#2a2a2a').pack(pady=10)
+        
+        # ===== 모니터 설정 =====
+        monitor_frame = tk.LabelFrame(scrollable_frame, text="모니터 설정", 
+                                     font=self.font_small, fg='white', bg='#2a2a2a')
+        monitor_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        # 듀얼모니터 설정
+        # 듀얼모니터: 프레젠테이션 창을 두 번째 모니터에 표시할 때 체크
+        dual_frame = tk.Frame(monitor_frame, bg='#2a2a2a')
+        dual_frame.pack(pady=5, padx=10, anchor=tk.W)
+        
+        dual_monitor_var = tk.BooleanVar(value=self.cfg.get("dual_monitor", False))
+        tk.Checkbutton(dual_frame, text="듀얼모니터 사용 (프레젠테이션 창 표시)", 
+                      variable=dual_monitor_var, 
+                      fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT)
+        
+        # 팀 순서 바꾸기
+        swap_frame = tk.Frame(monitor_frame, bg='#2a2a2a')
+        swap_frame.pack(pady=5, padx=10, anchor=tk.W)
+        
+        team_swapped_var = tk.BooleanVar(value=self.cfg.get("team_swapped", False))
+        tk.Checkbutton(swap_frame, text="팀 순서 바꾸기 (A팀 ↔ B팀 위치 전환)", 
+                      variable=team_swapped_var, 
+                      fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT)
+        
+        # 구분선
+        tk.Label(scrollable_frame, text="─────────────────────────────────────", fg='gray', bg='#2a2a2a').pack(pady=10)
+        
+        # ===== 게임 규칙 설정 =====
+        rules_frame = tk.LabelFrame(scrollable_frame, text="게임 규칙", 
+                                    font=self.font_small, fg='yellow', bg='#2a2a2a')
+        rules_frame.pack(fill=tk.X, padx=20, pady=10)
         
         # 게임 시간 설정
-        tk.Label(scrollable_frame, text="게임 시간 (분):", fg='white', bg='#2a2a2a').pack(pady=5)
-        game_minutes_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
+        tk.Label(rules_frame, text="게임 시간 (분):", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+        game_minutes_frame = tk.Frame(rules_frame, bg='#2a2a2a')
         game_minutes_frame.pack()
         
         game_minutes_var = tk.IntVar(value=self.cfg.get("game_minutes", 9))
-        for minutes in range(5, 13):  # 5분부터 12분까지
+        for minutes in range(5, 13):
             tk.Radiobutton(game_minutes_frame, text=f"{minutes}분", variable=game_minutes_var, 
-                          value=minutes, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+                          value=minutes, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=3)
         
         # 타임아웃 갯수 설정
-        tk.Label(scrollable_frame, text="타임아웃 갯수:", fg='white', bg='#2a2a2a').pack(pady=(15, 5))
-        timeout_count_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
+        tk.Label(rules_frame, text="타임아웃 갯수:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+        timeout_count_frame = tk.Frame(rules_frame, bg='#2a2a2a')
         timeout_count_frame.pack()
         
         timeout_count_var = tk.IntVar(value=self.cfg.get("timeout_count", 3))
-        for count in range(1, 6):  # 1개부터 5개까지
+        for count in range(1, 6):
             tk.Radiobutton(timeout_count_frame, text=f"{count}개", variable=timeout_count_var, 
                           value=count, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
         
         # 연장전 시간 설정
-        tk.Label(scrollable_frame, text="연장전 시간 (분):", fg='white', bg='#2a2a2a').pack(pady=(15, 5))
-        overtime_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
-        overtime_frame.pack()
+        tk.Label(rules_frame, text="연장전 시간 (분):", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+        overtime_frame = tk.Frame(rules_frame, bg='#2a2a2a')
+        overtime_frame.pack(pady=(0, 10))
         
         overtime_minutes_var = tk.IntVar(value=self.cfg.get("overtime_minutes", 5))
-        for minutes in range(1, 11):  # 1분부터 10분까지
+        for minutes in range(1, 11):
             tk.Radiobutton(overtime_frame, text=f"{minutes}분", variable=overtime_minutes_var, 
-                          value=minutes, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
-        
-        # 구분선
-        tk.Label(scrollable_frame, text="─────────────────────", fg='gray', bg='#2a2a2a').pack(pady=10)
-        
-        # 팀 컬러 설정
-        tk.Label(scrollable_frame, text="A팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=5)
-        team_a_color_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
-        team_a_color_frame.pack()
-        
-        team_a_color_var = tk.StringVar(value=self.cfg.get("team_a_color", "white"))
-        colors = ["white", "red", "blue", "yellow", "lightgreen"]
-        color_names = ["흰색", "빨강", "파랑", "노랑", "초록"]
-        for color, name in zip(colors, color_names):
-            tk.Radiobutton(team_a_color_frame, text=name, variable=team_a_color_var, 
-                          value=color, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
-        
-        tk.Label(scrollable_frame, text="B팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(15, 5))
-        team_b_color_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
-        team_b_color_frame.pack()
-        
-        team_b_color_var = tk.StringVar(value=self.cfg.get("team_b_color", "blue"))
-        for color, name in zip(colors, color_names):
-            tk.Radiobutton(team_b_color_frame, text=name, variable=team_b_color_var, 
-                          value=color, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+                          value=minutes, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=3)
         
         def save_settings():
             self.cfg["teamA"] = team_a_entry.get()
             self.cfg["teamB"] = team_b_entry.get()
             self.cfg["dual_monitor"] = dual_monitor_var.get()
-            self.cfg["swap_monitors"] = swap_monitors_var.get()
             self.cfg["team_swapped"] = team_swapped_var.get()
             
             # 새로운 설정들 저장
             self.cfg["game_minutes"] = game_minutes_var.get()
             self.cfg["timeout_count"] = timeout_count_var.get()
             self.cfg["overtime_minutes"] = overtime_minutes_var.get()
-            self.cfg["team_a_color"] = team_a_color_var.get()
-            self.cfg["team_b_color"] = team_b_color_var.get()
+            
+            # 팀 컬러는 바로 시작일 때만 저장
+            if self.is_quick_start and team_a_color_var and team_b_color_var:
+                self.cfg["team_a_color"] = team_a_color_var.get()
+                self.cfg["team_b_color"] = team_b_color_var.get()
             
             # 설정에 따른 값 업데이트
             self.cfg["game_seconds"] = self.cfg["game_minutes"] * 60
@@ -1451,16 +1638,21 @@ class DualMonitorScoreboard:
             self.update_displays()
             self.update_supabase_data()
             
-            # 모니터 전환 설정이나 팀 컬러가 변경된 경우 창을 다시 생성
-            if hasattr(self, 'presentation_window') and self.cfg.get("dual_monitor", False):
-                self.presentation_window.destroy()
+            # 듀얼모니터 설정 변경시 창 재생성
+            if self.cfg.get("dual_monitor", False):
+                if hasattr(self, 'presentation_window'):
+                    self.presentation_window.destroy()
                 self.create_presentation_window()
+            else:
+                if hasattr(self, 'presentation_window'):
+                    self.presentation_window.destroy()
+                    del self.presentation_window
             
-            # 컨트롤 창도 다시 생성 (팀 컬러 동기화)
+            # 컨트롤 창 재생성
             self.control_window.destroy()
             self.create_control_window()
             
-            # 키보드 바인딩 다시 설정 (창 재생성 후 필수!)
+            # 키보드 바인딩 다시 설정
             self.setup_keyboard_bindings()
             
             settings_window.destroy()
@@ -1470,23 +1662,43 @@ class DualMonitorScoreboard:
         button_frame.pack(pady=20)
         
         tk.Button(button_frame, text="저장", command=save_settings, 
-                 font=self.font_small, fg='green').pack(side=tk.LEFT, padx=10)
+                 font=self.font_small, fg='green', width=10).pack(side=tk.LEFT, padx=10)
         
         tk.Button(button_frame, text="취소", command=settings_window.destroy, 
-                 font=self.font_small, fg='red').pack(side=tk.LEFT, padx=10)
+                 font=self.font_small, fg='red', width=10).pack(side=tk.LEFT, padx=10)
         
-        # 마우스 휠 스크롤 지원
+        # 마우스 휠 스크롤 지원 (macOS 및 Windows/Linux 모두 지원)
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            # macOS와 Windows에서 delta 값이 다름
+            if event.delta:
+                # macOS는 delta가 작은 값, Windows는 120 단위
+                delta = event.delta
+                if abs(delta) >= 120:
+                    # Windows
+                    canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+                else:
+                    # macOS
+                    canvas.yview_scroll(int(-1 * delta), "units")
+            else:
+                # Linux (Button-4, Button-5)
+                if event.num == 4:
+                    canvas.yview_scroll(-1, "units")
+                elif event.num == 5:
+                    canvas.yview_scroll(1, "units")
         
-        def _bind_to_mousewheel(event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _bind_mousewheel(widget):
+            """위젯과 그 자식들에 마우스 휠 이벤트 바인딩"""
+            widget.bind("<MouseWheel>", _on_mousewheel)  # Windows/macOS
+            widget.bind("<Button-4>", _on_mousewheel)    # Linux 스크롤 업
+            widget.bind("<Button-5>", _on_mousewheel)    # Linux 스크롤 다운
+            
+            # 모든 자식 위젯에도 바인딩
+            for child in widget.winfo_children():
+                _bind_mousewheel(child)
         
-        def _unbind_from_mousewheel(event):
-            canvas.unbind_all("<MouseWheel>")
-        
-        canvas.bind('<Enter>', _bind_to_mousewheel)
-        canvas.bind('<Leave>', _unbind_from_mousewheel)
+        # canvas와 scrollable_frame에 마우스 휠 바인딩
+        _bind_mousewheel(canvas)
+        _bind_mousewheel(scrollable_frame)
     
     def run(self):
         """메인 루프 실행"""
