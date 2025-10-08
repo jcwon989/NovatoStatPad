@@ -23,6 +23,7 @@ CONFIG_PATH = os.path.expanduser("~/.scoreboard_config.json")
 load_dotenv()
 SUPABASE_URL = os.getenv("APP_SUPABASE_URL")
 SUPABASE_KEY = os.getenv("APP_SUPABASE_ANON_KEY")
+WEB_VIEWER_URL = os.getenv("APP_WEB_VIEWER_URL", "")  # 웹 뷰어 URL (방송 채널 표시용)
 
 def init_supabase_client():
     """Supabase 클라이언트 초기화"""
@@ -110,6 +111,7 @@ def load_cfg():
         "overtime_minutes": 5,  # 연장전 시간 (분)
         "team_a_color": "#F4F4F4",  # A팀 컬러 (흰색)
         "team_b_color": "#2563EB",  # B팀 컬러 (파랑)
+        "game_id": "novato-scoreboard",  # 게임 ID
     }
 
 def save_cfg(cfg):
@@ -309,8 +311,8 @@ class DualMonitorScoreboard:
         
         # Supabase 클라이언트 초기화
         self.supabase_client = init_supabase_client()
-        self.game_id = "pyscore"  # 고정된 게임 ID
-        print(f"게임 ID: {self.game_id}")
+        self.game_id = self.cfg.get("game_id", "novato-scoreboard")  # 설정에서 게임 ID 가져오기
+        print(f"게임 방송 채널: {self.get_broadcast_channel()}")
         
         # 게임 유형 저장 (서버 게임 vs 바로 시작)
         self.is_quick_start = (selected_game is None)
@@ -423,6 +425,16 @@ class DualMonitorScoreboard:
         print(f"점수: {self.scoreA} - {self.scoreB}")
         print(f"팀 컬러: {self.team1_color} / {self.team2_color}")
         print(f"팀 로고: {self.team1_logo} / {self.team2_logo}")
+    
+    def get_broadcast_channel(self):
+        """방송 채널 전체 주소 반환 (웹 뷰어 URL + 채널 ID)"""
+        if WEB_VIEWER_URL:
+            # URL 끝의 슬래시 제거
+            base_url = WEB_VIEWER_URL.rstrip('/')
+            return f"{base_url}/{self.game_id}"
+        else:
+            # 웹 뷰어 URL이 없으면 채널 ID만 반환
+            return self.game_id
     
     def get_team_logo(self, team_id):
         """팀 ID로 로고 URL 가져오기"""
@@ -566,7 +578,7 @@ class DualMonitorScoreboard:
     def create_control_window(self):
         """조작용 창 생성 (모니터 전환 기능 포함)"""
         self.control_window = tk.Toplevel(self.root)
-        self.control_window.title(f"Basketball Scoreboard - Game ID: {self.game_id}")
+        self.control_window.title(f"Novato Scoreboard - {self.get_broadcast_channel()}")
         
         # 반응형 창 크기 계산
         screen_width = self.root.winfo_screenwidth()
@@ -1550,6 +1562,27 @@ class DualMonitorScoreboard:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
+        # ===== 방송 채널 설정 =====
+        game_id_frame = tk.LabelFrame(scrollable_frame, text="방송 채널 (Supabase 전송용)", 
+                                      font=self.font_small, fg='orange', bg='#2a2a2a')
+        game_id_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        # 현재 방송 채널 전체 주소 표시
+        broadcast_channel = self.get_broadcast_channel()
+        tk.Label(game_id_frame, text=f"방송 채널: {broadcast_channel}", 
+                fg='lightgreen', bg='#2a2a2a', font=self.font_small).pack(pady=(10, 5), padx=10, anchor=tk.W)
+        
+        tk.Label(game_id_frame, text="채널 ID:", fg='white', bg='#2a2a2a').pack(pady=(10, 5), padx=10, anchor=tk.W)
+        game_id_entry = tk.Entry(game_id_frame, font=self.font_small, width=40)
+        game_id_entry.pack(pady=5, padx=10, anchor=tk.W)
+        game_id_entry.insert(0, self.game_id)
+        
+        tk.Label(game_id_frame, text="※ 여러 기기에서 같은 게임을 공유하려면 동일한 채널 ID를 사용하세요.", 
+                fg='gray', bg='#2a2a2a', font=('Arial', 9)).pack(pady=(0, 10), padx=10, anchor=tk.W)
+        
+        # 구분선
+        tk.Label(scrollable_frame, text="─────────────────────────────────────", fg='gray', bg='#2a2a2a').pack(pady=10)
+        
         # ===== 팀 설정 (좌우 배치) =====
         teams_frame = tk.Frame(scrollable_frame, bg='#2a2a2a')
         teams_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -1754,6 +1787,12 @@ class DualMonitorScoreboard:
                           value=minutes, fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=3)
         
         def save_settings():
+            # 게임 ID 저장
+            new_game_id = game_id_entry.get().strip()
+            if new_game_id:
+                self.cfg["game_id"] = new_game_id
+                self.game_id = new_game_id
+            
             # 팀 이름은 바로 시작일 때만 저장 (서버 게임은 수정 불가)
             if self.is_quick_start and team_a_entry and team_b_entry:
                 self.cfg["teamA"] = team_a_entry.get()
