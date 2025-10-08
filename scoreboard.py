@@ -63,14 +63,11 @@ def update_live_score_to_supabase(supabase_client, game_id, score_data):
             'shot_clock': int(score_data['shot_clock']),  # 24초 필드 추가
             'team1_color': score_data['team1_color'],  # 팀 컬러 전송 (live_score 테이블용)
             'team2_color': score_data['team2_color'],  # 팀 컬러 전송 (live_score 테이블용)
+            # 로고 정보 항상 추가 (None이어도 전송하여 이전 값 제거)
+            'team1_logo': score_data.get('team1_logo'),
+            'team2_logo': score_data.get('team2_logo'),
             'last_updated': datetime.now().isoformat()
         }
-        
-        # 로고 정보 추가 (있는 경우)
-        if 'team1_logo' in score_data and score_data['team1_logo']:
-            update_data['team1_logo'] = score_data['team1_logo']
-        if 'team2_logo' in score_data and score_data['team2_logo']:
-            update_data['team2_logo'] = score_data['team2_logo']
         
         result = supabase_client.table('live_scores').upsert(update_data, on_conflict='game_id').execute()
         
@@ -506,14 +503,11 @@ class DualMonitorScoreboard:
             'game_status': self.game_status,
             'shot_clock': int(self.shot_seconds),  # 24초 필드 추가
             'team1_color': self.get_color_hex(team1_color_value),
-            'team2_color': self.get_color_hex(team2_color_value)
+            'team2_color': self.get_color_hex(team2_color_value),
+            # 로고 정보 항상 추가 (없으면 None으로 명시적으로 전송하여 이전 값 제거)
+            'team1_logo': getattr(self, 'team1_logo', None),
+            'team2_logo': getattr(self, 'team2_logo', None)
         }
-        
-        # 로고 정보 추가 (있는 경우)
-        if hasattr(self, 'team1_logo') and self.team1_logo:
-            data['team1_logo'] = self.team1_logo
-        if hasattr(self, 'team2_logo') and self.team2_logo:
-            data['team2_logo'] = self.team2_logo
         
         return data
     
