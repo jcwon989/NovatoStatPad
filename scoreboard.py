@@ -719,7 +719,11 @@ class DualMonitorScoreboard:
         tk.Button(other_buttons_frame, text="설정 (F2)", 
                  command=self.show_settings, font=self.font_small).pack(side=tk.LEFT, padx=5)
         
-        # 종료 버튼 (설정 버튼 옆)
+        # 게임 변경 버튼 (설정 버튼 옆)
+        tk.Button(other_buttons_frame, text="게임 변경", 
+                 command=self.change_game, font=self.font_small, fg='orange').pack(side=tk.LEFT, padx=5)
+        
+        # 종료 버튼 (게임 변경 버튼 옆)
         tk.Button(other_buttons_frame, text="종료 (Esc)", 
                  command=self.on_closing, font=self.font_small, fg='red').pack(side=tk.LEFT, padx=5)
         
@@ -1195,6 +1199,28 @@ class DualMonitorScoreboard:
                 self.pres_shot_label.config(fg='red')
             else:
                 self.pres_shot_label.config(fg='orange')
+    
+    def change_game(self):
+        """게임 변경 (게임 선택 화면으로 이동)"""
+        result = tk.messagebox.askquestion("게임 변경", 
+                                         "게임을 변경하시겠습니까?\n현재 진행 중인 게임 데이터는 저장되지 않습니다.",
+                                         icon='question')
+        
+        if result == 'yes':
+            # 현재 앱 종료
+            self.timer_running = False
+            save_cfg(self.cfg)
+            
+            # 모든 창 닫기
+            if hasattr(self, 'presentation_window'):
+                self.presentation_window.destroy()
+            self.control_window.destroy()
+            self.root.destroy()
+            
+            # 새로운 게임 선택 다이얼로그 표시 및 앱 재시작
+            selected_game = show_game_selection_dialog()
+            new_app = DualMonitorScoreboard(selected_game)
+            new_app.run()
     
     def on_closing(self):
         """앱 종료 처리 (확인 팝업 포함)"""
