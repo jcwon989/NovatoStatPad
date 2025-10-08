@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import argparse
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from database import get_database
 
 # ===== 기본 설정 =====
 PERIOD_MAX_DEFAULT = 4
@@ -44,7 +45,7 @@ def update_live_score_to_supabase(supabase_client, game_id, score_data):
     
     try:
         # upsert 사용하여 게임 데이터 업데이트/삽입
-        result = supabase_client.table('live_scores').upsert({
+        update_data = {
             'game_id': game_id,
             'team1_name': score_data['team1_name'],
             'team2_name': score_data['team2_name'],
@@ -58,10 +59,18 @@ def update_live_score_to_supabase(supabase_client, game_id, score_data):
             'quarter_time': score_data['quarter_time'],
             'game_status': score_data['game_status'],
             'shot_clock': int(score_data['shot_clock']),  # 24초 필드 추가
-            # 'team1_color': score_data['team1_color'],  # 주석처리
-            # 'team2_color': score_data['team2_color'],  # 주석처리
+            'team1_color': score_data['team1_color'],  # 팀 컬러 전송 (live_score 테이블용)
+            'team2_color': score_data['team2_color'],  # 팀 컬러 전송 (live_score 테이블용)
             'last_updated': datetime.now().isoformat()
-        }, on_conflict='game_id').execute()
+        }
+        
+        # 로고 정보 추가 (있는 경우)
+        if 'team1_logo' in score_data and score_data['team1_logo']:
+            update_data['team1_logo'] = score_data['team1_logo']
+        if 'team2_logo' in score_data and score_data['team2_logo']:
+            update_data['team2_logo'] = score_data['team2_logo']
+        
+        result = supabase_client.table('live_scores').upsert(update_data, on_conflict='game_id').execute()
         
         return True
     except Exception as e:
@@ -119,8 +128,84 @@ def fmt_mmss_centi(s):
     centi = int((s - int(s)) * 100)
     return f"{m:02d}:{r:02d}.{centi:02d}"
 
+def show_game_selection_dialog():
+    """게임 선택 다이얼로그 표시"""
+    db = get_database()
+    if not db:
+        return None
+    
+    # 게임 목록 가져오기
+    games = db.get_games_by_month_range()
+    display_items = db.make_display_items(games)
+    
+    # 다이얼로그 생성
+    dialog = tk.Tk()
+    dialog.title("게임 선택")
+    dialog.geometry("600x500")
+    dialog.configure(bg='#1a1a1a')
+    
+    selected_game = {'game': None}
+    
+    tk.Label(dialog, text="게임을 선택하세요", 
+            font=('Arial', 16, 'bold'), fg='white', bg='#1a1a1a').pack(pady=20)
+    
+    # 리스트박스와 스크롤바
+    frame = tk.Frame(dialog, bg='#1a1a1a')
+    frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+    
+    scrollbar = tk.Scrollbar(frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, 
+                        font=('Arial', 12), bg='#2a2a2a', fg='white',
+                        selectmode=tk.SINGLE, height=15)
+    listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar.config(command=listbox.yview)
+    
+    # "바로시작" 추가
+    listbox.insert(0, "🎮 바로시작 (기본값)")
+    
+    # 게임 목록 추가
+    for item in display_items:
+        listbox.insert(tk.END, item['text'])
+    
+    # 첫 번째 항목 선택
+    listbox.selection_set(0)
+    
+    def on_select():
+        selection = listbox.curselection()
+        if selection:
+            idx = selection[0]
+            if idx == 0:
+                # 바로시작
+                selected_game['game'] = None
+            else:
+                # 게임 선택 (인덱스 조정)
+                selected_game['game'] = display_items[idx - 1]['game']
+        dialog.destroy()
+    
+    def on_cancel():
+        dialog.destroy()
+        exit()
+    
+    # 버튼 프레임
+    button_frame = tk.Frame(dialog, bg='#1a1a1a')
+    button_frame.pack(pady=(0, 20))
+    
+    tk.Button(button_frame, text="선택", command=on_select, 
+             font=('Arial', 12), width=10, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=10)
+    tk.Button(button_frame, text="취소", command=on_cancel, 
+             font=('Arial', 12), width=10, bg='#f44336', fg='white').pack(side=tk.LEFT, padx=10)
+    
+    # 더블클릭으로 선택
+    listbox.bind('<Double-Button-1>', lambda e: on_select())
+    
+    dialog.mainloop()
+    
+    return selected_game['game']
+
 class DualMonitorScoreboard:
-    def __init__(self):
+    def __init__(self, selected_game=None):
         self.cfg = load_cfg()
         
         # Supabase 클라이언트 초기화
@@ -128,23 +213,19 @@ class DualMonitorScoreboard:
         self.game_id = "pyscore"  # 고정된 게임 ID
         print(f"게임 ID: {self.game_id}")
         
-        # 게임 상태
-        self.scoreA = 0
-        self.scoreB = 0
-        self.period = 1
-        self.timeoutsA = self.cfg.get("timeouts_per_team", 3)
-        self.timeoutsB = self.cfg.get("timeouts_per_team", 3)
-        self.foulsA = 0
-        self.foulsB = 0
+        # 선택된 게임 데이터로 초기화
+        if selected_game:
+            self.init_from_game_data(selected_game)
+        else:
+            # 기본값으로 초기화
+            self.init_with_defaults()
+        
+        # 공통 초기화
         self.running_game = False
         self.running_shot = False
         self.game_seconds = self.cfg["game_seconds"]
         self.shot_seconds = self.cfg["shot_seconds"]
         self.game_status = "scheduled"
-        
-        # 팀 이름
-        self.teamA_name = self.cfg["teamA"]
-        self.teamB_name = self.cfg["teamB"]
         
         # 타이머
         self.last_update = time.time()
@@ -177,8 +258,94 @@ class DualMonitorScoreboard:
         # 초기 데이터를 Supabase에 전송
         self.update_supabase_data()
     
-    def get_color_hex(self, color_name):
-        """색상 이름을 hex 코드로 변환"""
+    def init_with_defaults(self):
+        """기본값으로 초기화 (바로시작)"""
+        self.scoreA = 0
+        self.scoreB = 0
+        self.period = 1
+        self.timeoutsA = self.cfg.get("timeouts_per_team", 3)
+        self.timeoutsB = self.cfg.get("timeouts_per_team", 3)
+        self.foulsA = 0
+        self.foulsB = 0
+        self.teamA_name = self.cfg["teamA"]
+        self.teamB_name = self.cfg["teamB"]
+        self.team1_logo = None
+        self.team2_logo = None
+        self.team1_color = None
+        self.team2_color = None
+    
+    def init_from_game_data(self, game_data):
+        """게임 데이터로 초기화"""
+        # 팀 이름
+        self.teamA_name = game_data.get("team1") if game_data.get("team1") else "홈팀"
+        self.teamB_name = game_data.get("team2") if game_data.get("team2") else "어웨이팀"
+        
+        # 점수
+        self.scoreA = game_data.get("team1_score") if game_data.get("team1_score") is not None else 0
+        self.scoreB = game_data.get("team2_score") if game_data.get("team2_score") is not None else 0
+        
+        # 파울, 타임아웃은 기본값
+        self.period = 1
+        self.timeoutsA = self.cfg.get("timeouts_per_team", 3)
+        self.timeoutsB = self.cfg.get("timeouts_per_team", 3)
+        self.foulsA = 0
+        self.foulsB = 0
+        
+        # 팀 컬러 저장 (game_league에서 가져온 값)
+        self.team1_color = game_data.get("team1_color")
+        self.team2_color = game_data.get("team2_color")
+        
+        # 팀 로고 가져오기
+        team1_id = game_data.get("team1_id")
+        team2_id = game_data.get("team2_id")
+        print(f"game_league에서 가져온 team1_id: {team1_id}, team2_id: {team2_id}")
+        
+        self.team1_logo = self.get_team_logo(team1_id)
+        self.team2_logo = self.get_team_logo(team2_id)
+        
+        print(f"게임 로드: {self.teamA_name} vs {self.teamB_name}")
+        print(f"점수: {self.scoreA} - {self.scoreB}")
+        print(f"팀 컬러: {self.team1_color} / {self.team2_color}")
+        print(f"팀 로고: {self.team1_logo} / {self.team2_logo}")
+    
+    def get_team_logo(self, team_id):
+        """팀 ID로 로고 URL 가져오기"""
+        if not team_id:
+            print(f"팀 ID가 없음: {team_id}")
+            return None
+        
+        if not self.supabase_client:
+            print("Supabase 클라이언트가 없음")
+            return None
+        
+        try:
+            print(f"팀 로고 조회 시작: team_id={team_id}, type={type(team_id)}")
+            response = self.supabase_client.table('teams').select('team_logo').eq('id', team_id).execute()
+            print(f"조회 결과: {response.data}")
+            
+            if response.data and len(response.data) > 0:
+                logo_url = response.data[0].get('team_logo')
+                print(f"팀 로고 찾음: {logo_url}")
+                return logo_url
+            else:
+                print(f"팀 로고를 찾을 수 없음: team_id={team_id}")
+        except Exception as e:
+            print(f"팀 로고 조회 실패: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return None
+    
+    def get_color_hex(self, color_value):
+        """색상 값을 hex 코드로 변환"""
+        if not color_value:
+            return "#FFFFFF"
+        
+        # 이미 hex 코드인 경우 (#로 시작)
+        if isinstance(color_value, str) and color_value.startswith('#'):
+            return color_value
+        
+        # 색상 이름인 경우 hex로 변환
         color_map = {
             "white": "#FFFFFF",
             "red": "#FF0000", 
@@ -187,11 +354,15 @@ class DualMonitorScoreboard:
             "green": "#00FF00",
             "black": "#000000"
         }
-        return color_map.get(color_name, "#FFFFFF")
+        return color_map.get(color_value, "#FFFFFF")
     
     def get_score_data(self):
         """현재 게임 상태를 딕셔너리로 반환"""
-        return {
+        # game_league에서 가져온 팀 컬러 사용 (없으면 기본값)
+        team1_color_value = getattr(self, 'team1_color', None) or self.cfg.get("team_a_color", "white")
+        team2_color_value = getattr(self, 'team2_color', None) or self.cfg.get("team_b_color", "blue")
+        
+        data = {
             'game_id': self.game_id,
             'team1_name': self.teamA_name,
             'team2_name': self.teamB_name,
@@ -205,9 +376,17 @@ class DualMonitorScoreboard:
             'quarter_time': fmt_mmss(self.game_seconds),
             'game_status': self.game_status,
             'shot_clock': int(self.shot_seconds),  # 24초 필드 추가
-            'team1_color': self.get_color_hex(self.cfg.get("team_a_color", "white")),
-            'team2_color': self.get_color_hex(self.cfg.get("team_b_color", "blue"))
+            'team1_color': self.get_color_hex(team1_color_value),
+            'team2_color': self.get_color_hex(team2_color_value)
         }
+        
+        # 로고 정보 추가 (있는 경우)
+        if hasattr(self, 'team1_logo') and self.team1_logo:
+            data['team1_logo'] = self.team1_logo
+        if hasattr(self, 'team2_logo') and self.team2_logo:
+            data['team2_logo'] = self.team2_logo
+        
+        return data
     
     def update_supabase_data(self):
         """Supabase에 현재 게임 데이터 업데이트 (변경사항이 있을 때만)"""
@@ -315,11 +494,9 @@ class DualMonitorScoreboard:
         team_a_frame = tk.Frame(score_frame, bg='#1a1a1a')
         team_a_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # 팀 컬러 가져오기
-        team_a_color = self.cfg.get("team_a_color", "white")
-        
+        # 조작용 창에서는 모두 흰색으로 표시
         self.team_a_label = tk.Label(team_a_frame, text=self.teamA_name, 
-                                    font=self.font_medium, fg=team_a_color, bg='#1a1a1a')
+                                    font=self.font_medium, fg='white', bg='#1a1a1a')
         self.team_a_label.pack()
         
         self.score_a_label = tk.Label(team_a_frame, text=str(self.scoreA), 
@@ -358,11 +535,9 @@ class DualMonitorScoreboard:
         team_b_frame = tk.Frame(score_frame, bg='#1a1a1a')
         team_b_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
-        # 팀 컬러 가져오기
-        team_b_color = self.cfg.get("team_b_color", "blue")
-        
+        # 조작용 창에서는 모두 흰색으로 표시
         self.team_b_label = tk.Label(team_b_frame, text=self.teamB_name, 
-                                    font=self.font_medium, fg=team_b_color, bg='#1a1a1a')
+                                    font=self.font_medium, fg='white', bg='#1a1a1a')
         self.team_b_label.pack()
         
         self.score_b_label = tk.Label(team_b_frame, text=str(self.scoreB), 
@@ -380,14 +555,14 @@ class DualMonitorScoreboard:
         a_stats_row = tk.Frame(a_stats_frame, bg='#1a1a1a')
         a_stats_row.pack()
         
-        tk.Label(a_stats_row, text="타임아웃", font=self.font_small, fg=team_a_color, bg='#1a1a1a').pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(a_stats_row, text="타임아웃", font=self.font_small, fg='white', bg='#1a1a1a').pack(side=tk.LEFT, padx=(0, 5))
         self.timeout_a_label = tk.Label(a_stats_row, text=str(self.timeoutsA), 
-                                       font=self.font_medium, fg=team_a_color, bg='#1a1a1a')
+                                       font=self.font_medium, fg='white', bg='#1a1a1a')
         self.timeout_a_label.pack(side=tk.LEFT, padx=(0, 20))
         
-        tk.Label(a_stats_row, text="파울", font=self.font_small, fg=team_a_color, bg='#1a1a1a').pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(a_stats_row, text="파울", font=self.font_small, fg='white', bg='#1a1a1a').pack(side=tk.LEFT, padx=(0, 5))
         self.foul_a_label = tk.Label(a_stats_row, text=str(self.foulsA), 
-                                    font=self.font_medium, fg=team_a_color, bg='#1a1a1a')
+                                    font=self.font_medium, fg='white', bg='#1a1a1a')
         self.foul_a_label.pack(side=tk.LEFT)
         
         # B팀 타임아웃/파울
@@ -397,14 +572,14 @@ class DualMonitorScoreboard:
         b_stats_row = tk.Frame(b_stats_frame, bg='#1a1a1a')
         b_stats_row.pack()
         
-        tk.Label(b_stats_row, text="타임아웃", font=self.font_small, fg=team_b_color, bg='#1a1a1a').pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(b_stats_row, text="타임아웃", font=self.font_small, fg='white', bg='#1a1a1a').pack(side=tk.LEFT, padx=(0, 5))
         self.timeout_b_label = tk.Label(b_stats_row, text=str(self.timeoutsB), 
-                                       font=self.font_medium, fg=team_b_color, bg='#1a1a1a')
+                                       font=self.font_medium, fg='white', bg='#1a1a1a')
         self.timeout_b_label.pack(side=tk.LEFT, padx=(0, 20))
         
-        tk.Label(b_stats_row, text="파울", font=self.font_small, fg=team_b_color, bg='#1a1a1a').pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(b_stats_row, text="파울", font=self.font_small, fg='white', bg='#1a1a1a').pack(side=tk.LEFT, padx=(0, 5))
         self.foul_b_label = tk.Label(b_stats_row, text=str(self.foulsB), 
-                                    font=self.font_medium, fg=team_b_color, bg='#1a1a1a')
+                                    font=self.font_medium, fg='white', bg='#1a1a1a')
         self.foul_b_label.pack(side=tk.LEFT)
         
         # 조작 버튼들
@@ -597,32 +772,28 @@ class DualMonitorScoreboard:
         bottom_spacer = tk.Frame(main_frame, bg='#111111')
         bottom_spacer.pack(fill=tk.BOTH, expand=True)
         
-        # 팀 순서와 컬러 설정
+        # 팀 순서 설정 (색상은 모두 흰색 사용)
         is_swapped = self.cfg.get("team_swapped", False)
-        team_a_color = self.cfg.get("team_a_color", "white")
-        team_b_color = self.cfg.get("team_b_color", "blue")
         
         if is_swapped:
             # 팀 순서가 바뀐 경우: B팀이 왼쪽, A팀이 오른쪽
-            self.create_team_display(content_frame, self.teamB_name, self.teamA_name, 
-                                   team_b_color, team_a_color, True)
+            self.create_team_display(content_frame, self.teamB_name, self.teamA_name, True)
         else:
             # 기본 순서: A팀이 왼쪽, B팀이 오른쪽
-            self.create_team_display(content_frame, self.teamA_name, self.teamB_name, 
-                                   team_a_color, team_b_color, False)
+            self.create_team_display(content_frame, self.teamA_name, self.teamB_name, False)
         
         # 중앙 시간 표시
         self.create_time_display(content_frame)
     
-    def create_team_display(self, parent, left_team, right_team, left_color, right_color, swapped):
-        """팀 표시 영역 생성"""
+    def create_team_display(self, parent, left_team, right_team, swapped):
+        """팀 표시 영역 생성 (모두 흰색으로 표시)"""
         # 왼쪽 팀 (A팀 또는 B팀)
         left_frame = tk.Frame(parent, bg='#111111')
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         left_team_label = tk.Label(left_frame, text=left_team, 
                                   font=self.pres_font_team, 
-                                  fg=left_color, bg='#111111')
+                                  fg='white', bg='#111111')
         left_team_label.pack(pady=(50, 20))
         
         if swapped:
@@ -636,17 +807,17 @@ class DualMonitorScoreboard:
             stats_b_frame.pack(pady=10)
             
             tk.Label(stats_b_frame, text="TO", font=self.pres_font_stats, 
-                    fg=right_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+                    fg='white', bg='#111111').pack(side=tk.LEFT, padx=5)
             self.pres_timeout_b_label = tk.Label(stats_b_frame, text=str(self.timeoutsB), 
                                                font=self.pres_font_stats, 
-                                               fg=right_color, bg='#111111')
+                                               fg='white', bg='#111111')
             self.pres_timeout_b_label.pack(side=tk.LEFT, padx=10)
             
             tk.Label(stats_b_frame, text="F", font=self.pres_font_stats, 
-                    fg=right_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+                    fg='white', bg='#111111').pack(side=tk.LEFT, padx=5)
             self.pres_foul_b_label = tk.Label(stats_b_frame, text=str(self.foulsB), 
                                             font=self.pres_font_stats, 
-                                            fg=right_color, bg='#111111')
+                                            fg='white', bg='#111111')
             self.pres_foul_b_label.pack(side=tk.LEFT)
         else:
             self.pres_score_a_label = tk.Label(left_frame, text=str(self.scoreA), 
@@ -659,17 +830,17 @@ class DualMonitorScoreboard:
             stats_a_frame.pack(pady=10)
             
             tk.Label(stats_a_frame, text="TO", font=self.pres_font_stats, 
-                    fg=left_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+                    fg='white', bg='#111111').pack(side=tk.LEFT, padx=5)
             self.pres_timeout_a_label = tk.Label(stats_a_frame, text=str(self.timeoutsA), 
                                                font=self.pres_font_stats, 
-                                               fg=left_color, bg='#111111')
+                                               fg='white', bg='#111111')
             self.pres_timeout_a_label.pack(side=tk.LEFT, padx=10)
             
             tk.Label(stats_a_frame, text="F", font=self.pres_font_stats, 
-                    fg=left_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+                    fg='white', bg='#111111').pack(side=tk.LEFT, padx=5)
             self.pres_foul_a_label = tk.Label(stats_a_frame, text=str(self.foulsA), 
                                             font=self.pres_font_stats, 
-                                            fg=left_color, bg='#111111')
+                                            fg='white', bg='#111111')
             self.pres_foul_a_label.pack(side=tk.LEFT)
         
         # 오른쪽 팀 (B팀 또는 A팀)
@@ -678,7 +849,7 @@ class DualMonitorScoreboard:
         
         right_team_label = tk.Label(right_frame, text=right_team, 
                                    font=self.pres_font_team, 
-                                   fg=right_color, bg='#111111')
+                                   fg='white', bg='#111111')
         right_team_label.pack(pady=(50, 20))
         
         if swapped:
@@ -692,17 +863,17 @@ class DualMonitorScoreboard:
             stats_a_frame.pack(pady=10)
             
             tk.Label(stats_a_frame, text="TO", font=self.pres_font_stats, 
-                    fg=left_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+                    fg='white', bg='#111111').pack(side=tk.LEFT, padx=5)
             self.pres_timeout_a_label = tk.Label(stats_a_frame, text=str(self.timeoutsA), 
                                                font=self.pres_font_stats, 
-                                               fg=left_color, bg='#111111')
+                                               fg='white', bg='#111111')
             self.pres_timeout_a_label.pack(side=tk.LEFT, padx=10)
             
             tk.Label(stats_a_frame, text="F", font=self.pres_font_stats, 
-                    fg=left_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+                    fg='white', bg='#111111').pack(side=tk.LEFT, padx=5)
             self.pres_foul_a_label = tk.Label(stats_a_frame, text=str(self.foulsA), 
                                             font=self.pres_font_stats, 
-                                            fg=left_color, bg='#111111')
+                                            fg='white', bg='#111111')
             self.pres_foul_a_label.pack(side=tk.LEFT)
         else:
             self.pres_score_b_label = tk.Label(right_frame, text=str(self.scoreB), 
@@ -715,17 +886,17 @@ class DualMonitorScoreboard:
             stats_b_frame.pack(pady=10)
             
             tk.Label(stats_b_frame, text="TO", font=self.pres_font_stats, 
-                    fg=right_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+                    fg='white', bg='#111111').pack(side=tk.LEFT, padx=5)
             self.pres_timeout_b_label = tk.Label(stats_b_frame, text=str(self.timeoutsB), 
                                                font=self.pres_font_stats, 
-                                               fg=right_color, bg='#111111')
+                                               fg='white', bg='#111111')
             self.pres_timeout_b_label.pack(side=tk.LEFT, padx=10)
             
             tk.Label(stats_b_frame, text="F", font=self.pres_font_stats, 
-                    fg=right_color, bg='#111111').pack(side=tk.LEFT, padx=5)
+                    fg='white', bg='#111111').pack(side=tk.LEFT, padx=5)
             self.pres_foul_b_label = tk.Label(stats_b_frame, text=str(self.foulsB), 
                                             font=self.pres_font_stats, 
-                                            fg=right_color, bg='#111111')
+                                            fg='white', bg='#111111')
             self.pres_foul_b_label.pack(side=tk.LEFT)
     
     def create_time_display(self, parent):
@@ -1244,8 +1415,11 @@ def main():
     if args.periods: cfg["period_max"] = max(1, int(args.periods))
     save_cfg(cfg)
     
+    # 게임 선택 다이얼로그 표시
+    selected_game = show_game_selection_dialog()
+    
     # 스코어보드 실행
-    app = DualMonitorScoreboard()
+    app = DualMonitorScoreboard(selected_game)
     app.run()
 
 if __name__ == "__main__":

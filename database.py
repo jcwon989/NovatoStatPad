@@ -40,9 +40,9 @@ class GameDatabase:
         next_month_end = next_month - timedelta(days=next_month.day)
         
         try:
-            # game_league 테이블에서 게임 데이터 조회
+            # game_league 테이블에서 게임 데이터 조회 (team_id 추가)
             response = self.supabase.table("game_league").select(
-                "id, game_date, team1, team2, game_type, division, team1_score, team2_score, team1_color, team2_color, game_stage"
+                "id, game_date, team1, team2, game_type, division, team1_score, team2_score, team1_color, team2_color, game_stage, team1_id, team2_id"
             ).gte(
                 "game_date", prev_month_start.strftime("%Y-%m-%d")
             ).lte(
