@@ -409,13 +409,17 @@ def show_game_selection_dialog():
     return selected_game['game']
 
 class DualMonitorScoreboard:
-    def __init__(self, selected_game=None):
+    def __init__(self, selected_game=None, small_screen=False):
         self.cfg = load_cfg()
+        
+        # 화면 크기 모드 설정
+        self.small_screen = small_screen
         
         # Supabase 클라이언트 초기화
         self.supabase_client = init_supabase_client()
         self.game_id = self.cfg.get("game_id", "novato-scoreboard")  # 설정에서 게임 ID 가져오기
         print(f"게임 방송 채널: {self.get_broadcast_channel()}")
+        print(f"화면 모드: {'작은 화면 (800x480)' if small_screen else '일반 화면'}")
         
         # 게임 유형 저장 (서버 게임 vs 바로 시작)
         self.is_quick_start = (selected_game is None)
@@ -658,14 +662,22 @@ class DualMonitorScoreboard:
         # 폰트 크기 비율 (가로 세로 중 작은 값 사용)
         font_ratio = min(width_ratio, height_ratio)
         
-        # 조작용 창 폰트 (작은 화면용)
-        self.font_large = font.Font(family="Arial", size=int(48 * font_ratio), weight="bold")
-        self.font_medium = font.Font(family="Arial", size=int(24 * font_ratio))
-        self.font_small = font.Font(family="Arial", size=int(16 * font_ratio))
-        self.font_score = font.Font(family="Arial", size=int(72 * font_ratio), weight="bold")
-        self.font_time = font.Font(family="Arial", size=int(36 * font_ratio), weight="bold")
+        if self.small_screen:
+            # 작은 화면 모드 (800x480): 창 크기는 그대로, 폰트만 1.2배 증가
+            self.font_large = font.Font(family="Arial", size=19, weight="bold")  # 16 * 1.2
+            self.font_medium = font.Font(family="Arial", size=12)  # 10 * 1.2
+            self.font_small = font.Font(family="Arial", size=10)  # 8 * 1.2 (반올림)
+            self.font_score = font.Font(family="Arial", size=38, weight="bold")  # 32 * 1.2
+            self.font_time = font.Font(family="Arial", size=24, weight="bold")  # 20 * 1.2
+        else:
+            # 일반 화면 모드: 반응형 컨트롤 창 폰트
+            self.font_large = font.Font(family="Arial", size=int(48 * font_ratio), weight="bold")
+            self.font_medium = font.Font(family="Arial", size=int(24 * font_ratio))
+            self.font_small = font.Font(family="Arial", size=int(16 * font_ratio))
+            self.font_score = font.Font(family="Arial", size=int(72 * font_ratio), weight="bold")
+            self.font_time = font.Font(family="Arial", size=int(36 * font_ratio), weight="bold")
         
-        # 프레젠테이션용 폰트 (큰 화면용, 75% 크기)
+        # 프레젠테이션용 폰트 (항상 큰 화면용, small_screen과 무관)
         self.pres_font_team = font.Font(family="Arial", size=int(90 * font_ratio), weight="bold")  # 120 → 90
         self.pres_font_score = font.Font(family="Arial", size=int(300 * font_ratio), weight="bold")  # 400 → 300
         self.pres_font_time = font.Font(family="Arial", size=int(120 * font_ratio), weight="bold")  # 160 → 120
@@ -678,34 +690,47 @@ class DualMonitorScoreboard:
         self.control_window = tk.Toplevel(self.root)
         self.control_window.title(f"Novato Scoreboard - {self.get_broadcast_channel()}")
         
-        # 반응형 창 크기 계산
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        
-        # 조작용 창 크기 (화면 크기에 비례)
-        control_width = max(800, min(1200, int(screen_width * 0.6)))
-        control_height = max(600, min(900, int(screen_height * 0.7)))
-        
-        # 모니터 전환에 따른 위치 설정
-        if self.cfg.get("swap_monitors", False):
-            # 전환 모드: 조작용 창을 두 번째 모니터에
-            self.control_window.geometry(f"{control_width}x{control_height}+1920+0")  # 두 번째 모니터
+        if self.small_screen:
+            # 작은 화면 모드: 800x480 고정 (내용물만 1.2배)
+            control_width = 800
+            control_height = 480
+            self.control_window.resizable(False, False)  # 크기 고정
+            # 작은 화면은 해당 모니터의 좌측 상단에 고정
+            if self.cfg.get("swap_monitors", False):
+                self.control_window.geometry(f"{control_width}x{control_height}+1920+0")
+            else:
+                self.control_window.geometry(f"{control_width}x{control_height}+0+0")
         else:
-            # 기본 모드: 조작용 창을 첫 번째 모니터에
-            self.control_window.geometry(f"{control_width}x{control_height}+0+0")  # 첫 번째 모니터
+            # 일반 화면 모드: 반응형 창 크기
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            
+            # 조작용 창 크기 (화면 크기에 비례)
+            control_width = max(800, min(1200, int(screen_width * 0.6)))
+            control_height = max(600, min(900, int(screen_height * 0.7)))
+            
+            self.control_window.resizable(True, True)
+            
+            # 일반 화면은 모니터 전환 기능 적용
+            if self.cfg.get("swap_monitors", False):
+                # 전환 모드: 조작용 창을 두 번째 모니터에
+                self.control_window.geometry(f"{control_width}x{control_height}+1920+0")  # 두 번째 모니터
+            else:
+                # 기본 모드: 조작용 창을 첫 번째 모니터에
+                self.control_window.geometry(f"{control_width}x{control_height}+0+0")  # 첫 번째 모니터
             
         self.control_window.configure(bg='#1a1a1a')
-        # self.control_window.resizable(False, False)
-        self.control_window.resizable(True, True)
         
-        # 메인 프레임
+        # 메인 프레임 (작은 화면은 패딩 최소화)
+        padding = 6 if self.small_screen else 20  # 작은 화면 패딩 1.2배 증가 (5->6)
         main_frame = tk.Frame(self.control_window, bg='#1a1a1a')
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=padding, pady=padding)
         
-        # 제목 (중앙 정렬)
-        title_label = tk.Label(main_frame, text="NOVATO SCOREBOARD", 
-                              font=self.font_small, fg='gray', bg='#1a1a1a')
-        title_label.pack(anchor=tk.CENTER, pady=(0, 10))
+        # 제목 (작은 화면에서는 숨김)
+        if not self.small_screen:
+            title_label = tk.Label(main_frame, text="NOVATO SCOREBOARD", 
+                                  font=self.font_small, fg='gray', bg='#1a1a1a')
+            title_label.pack(anchor=tk.CENTER, pady=(0, 10))
         
         # 스코어 표시 영역 (개선된 레이아웃)
         score_frame = tk.Frame(main_frame, bg='#1a1a1a')
@@ -847,19 +872,22 @@ class DualMonitorScoreboard:
         # 조작 버튼들
         self.create_control_buttons(main_frame)
         
-        # 힌트
-        self.create_hints(main_frame)
-        
-        # 창이 완전히 렌더링된 후 크기 업데이트
-        self.control_window.after(100, self.update_hints_text)
-        
-        # 창 크기 변경 시 힌트 텍스트 업데이트
-        self.control_window.bind('<Configure>', lambda e: self.update_hints_text())
+        # 힌트 (작은 화면에서는 간소화)
+        if not self.small_screen:
+            self.create_hints(main_frame)
+            # 창이 완전히 렌더링된 후 크기 업데이트
+            self.control_window.after(100, self.update_hints_text)
+            # 창 크기 변경 시 힌트 텍스트 업데이트
+            self.control_window.bind('<Configure>', lambda e: self.update_hints_text())
+        else:
+            # 작은 화면용 간단한 힌트
+            self.create_simple_hints(main_frame)
     
     def create_control_buttons(self, parent):
         """조작 버튼들 생성"""
+        pady_spacing = (0, 6) if self.small_screen else (0, 20)  # 작은 화면 간격 1.2배 증가 (5->6)
         button_frame = tk.Frame(parent, bg='#1a1a1a')
-        button_frame.pack(fill=tk.X, pady=(0, 20))
+        button_frame.pack(fill=tk.X, pady=pady_spacing)
         
         # A팀 점수
         a_team_frame = tk.LabelFrame(button_frame, text="A팀 점수", 
@@ -1020,41 +1048,81 @@ class DualMonitorScoreboard:
         
         # 기타 조작 버튼들 (중앙 배치)
         other_buttons_frame = tk.Frame(parent, bg='#1a1a1a')
-        other_buttons_frame.pack(pady=(20, 10))
+        pady_btn = (10, 5) if self.small_screen else (20, 10)
+        other_buttons_frame.pack(pady=pady_btn)
         
         # 버튼 컨테이너 (중앙 정렬용)
         buttons_container = tk.Frame(other_buttons_frame, bg='#1a1a1a')
         buttons_container.pack()
         
-        tk.Button(buttons_container, text="전체 리셋 (r)", 
-                 command=self.reset_all, font=self.font_small).pack(side=tk.LEFT, padx=2)
+        if self.small_screen:
+            # 작은 화면: 필수 버튼만 표시 (2줄로 압축)
+            # 첫 번째 줄
+            row1 = tk.Frame(buttons_container, bg='#1a1a1a')
+            row1.pack(pady=1)
+            
+            tk.Button(row1, text="리셋(r)", command=self.reset_all, 
+                     font=self.font_small, width=8).pack(side=tk.LEFT, padx=1)
+            tk.Button(row1, text="시간(t)", command=self.reset_game_time, 
+                     font=self.font_small, fg='blue', width=8).pack(side=tk.LEFT, padx=1)
+            tk.Button(row1, text="Q-([)", command=lambda: self.adjust_period(-1),
+                     font=self.font_small, width=8).pack(side=tk.LEFT, padx=1)
+            tk.Button(row1, text="Q+(])", command=lambda: self.adjust_period(1),
+                     font=self.font_small, width=8).pack(side=tk.LEFT, padx=1)
+            
+            # 두 번째 줄
+            row2 = tk.Frame(buttons_container, bg='#1a1a1a')
+            row2.pack(pady=1)
+            
+            tk.Button(row2, text="설정(F2)", command=self.show_settings, 
+                     font=self.font_small, width=8).pack(side=tk.LEFT, padx=1)
+            tk.Button(row2, text="게임(F3)", command=self.change_game, 
+                     font=self.font_small, fg='orange', width=8).pack(side=tk.LEFT, padx=1)
+            tk.Button(row2, text="모니터(F4)", command=self.toggle_monitor_swap, 
+                     font=self.font_small, fg='purple', width=8).pack(side=tk.LEFT, padx=1)
+            tk.Button(row2, text="종료(Esc)", command=self.on_closing, 
+                     font=self.font_small, fg='red', width=8).pack(side=tk.LEFT, padx=1)
+        else:
+            # 일반 화면: 모든 버튼 한 줄로 표시
+            tk.Button(buttons_container, text="전체 리셋 (r)", 
+                     command=self.reset_all, font=self.font_small).pack(side=tk.LEFT, padx=2)
+            
+            # 게임 시간 리셋 (전체 리셋 옆에 배치)
+            tk.Button(buttons_container, text="시간 리셋 (t)", 
+                     command=self.reset_game_time, font=self.font_small, fg='blue').pack(side=tk.LEFT, padx=5)
+            
+            # 쿼터 조작 (시간 리셋 옆에 배치)
+            tk.Button(buttons_container, text="쿼터 -1 ([)", command=lambda: self.adjust_period(-1),
+                     font=self.font_small).pack(side=tk.LEFT, padx=5)
+            tk.Button(buttons_container, text="쿼터 +1 (])", command=lambda: self.adjust_period(1),
+                     font=self.font_small).pack(side=tk.LEFT, padx=5)
+            
+            # 설정 버튼 (쿼터 버튼 옆)
+            tk.Button(buttons_container, text="설정 (F2)", 
+                     command=self.show_settings, font=self.font_small).pack(side=tk.LEFT, padx=5)
+            
+            # 게임 변경 버튼 (설정 버튼 옆)
+            tk.Button(buttons_container, text="게임 변경 (F3)", 
+                     command=self.change_game, font=self.font_small, fg='orange').pack(side=tk.LEFT, padx=5)
+            
+            # 모니터 전환 버튼 (게임 변경 버튼 옆)
+            tk.Button(buttons_container, text="모니터 전환 (F4)", 
+                     command=self.toggle_monitor_swap, font=self.font_small, fg='purple').pack(side=tk.LEFT, padx=5)
+            
+            # 종료 버튼 (모니터 전환 버튼 옆)
+            tk.Button(buttons_container, text="종료 (Esc)", 
+                     command=self.on_closing, font=self.font_small, fg='red').pack(side=tk.LEFT, padx=5)
         
-        # 게임 시간 리셋 (전체 리셋 옆에 배치)
-        tk.Button(buttons_container, text="시간 리셋 (t)", 
-                 command=self.reset_game_time, font=self.font_small, fg='blue').pack(side=tk.LEFT, padx=5)
+    
+    def create_simple_hints(self, parent):
+        """작은 화면용 간단한 힌트 표시"""
+        hints_frame = tk.Frame(parent, bg='#1a1a1a')
+        hints_frame.pack(fill=tk.X, pady=(6, 0))  # 1.2배 증가 (5->6)
         
-        # 쿼터 조작 (시간 리셋 옆에 배치)
-        tk.Button(buttons_container, text="쿼터 -1 ([)", command=lambda: self.adjust_period(-1),
-                 font=self.font_small).pack(side=tk.LEFT, padx=5)
-        tk.Button(buttons_container, text="쿼터 +1 (])", command=lambda: self.adjust_period(1),
-                 font=self.font_small).pack(side=tk.LEFT, padx=5)
+        hints_text = "Space(시작) | t(시간리셋) | s(샷클럭) | d/f(24/14초) | F2(설정)"
         
-        # 설정 버튼 (쿼터 버튼 옆)
-        tk.Button(buttons_container, text="설정 (F2)", 
-                 command=self.show_settings, font=self.font_small).pack(side=tk.LEFT, padx=5)
-        
-        # 게임 변경 버튼 (설정 버튼 옆)
-        tk.Button(buttons_container, text="게임 변경 (F3)", 
-                 command=self.change_game, font=self.font_small, fg='orange').pack(side=tk.LEFT, padx=5)
-        
-        # 모니터 전환 버튼 (게임 변경 버튼 옆)
-        tk.Button(buttons_container, text="모니터 전환 (F4)", 
-                 command=self.toggle_monitor_swap, font=self.font_small, fg='purple').pack(side=tk.LEFT, padx=5)
-        
-        # 종료 버튼 (모니터 전환 버튼 옆)
-        tk.Button(buttons_container, text="종료 (Esc)", 
-                 command=self.on_closing, font=self.font_small, fg='red').pack(side=tk.LEFT, padx=5)
-        
+        tk.Label(hints_frame, text=hints_text, 
+                font=('Arial', 8), fg='gray', bg='#1a1a1a').pack(anchor=tk.CENTER)  # 1.2배 증가 (7->8)
     
     def create_hints(self, parent):
         """힌트 표시"""
@@ -2109,6 +2177,7 @@ def main():
     parser.add_argument("--game", type=int, help="게임 시간 (초)")
     parser.add_argument("--shot", type=int, help="샷 클럭 시간 (초)")
     parser.add_argument("--periods", type=int, help="최대 쿼터 수")
+    parser.add_argument("--small-screen", action="store_true", help="작은 화면 모드 (800x480)")
     args = parser.parse_args()
     
     # 설정 로드 및 명령행 인수 적용
@@ -2123,8 +2192,8 @@ def main():
     # 게임 선택 다이얼로그 표시
     selected_game = show_game_selection_dialog()
     
-    # 스코어보드 실행
-    app = DualMonitorScoreboard(selected_game)
+    # 스코어보드 실행 (작은 화면 모드 전달)
+    app = DualMonitorScoreboard(selected_game, small_screen=args.small_screen)
     app.run()
 
 if __name__ == "__main__":
