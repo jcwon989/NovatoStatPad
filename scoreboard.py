@@ -11,6 +11,9 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from database import get_database
 import pygame  # 사운드 재생용
+from PIL import Image, ImageTk  # 이미지 처리용
+import requests  # 이미지 다운로드용
+from io import BytesIO  # 이미지 메모리 처리용
 
 # ===== 기본 설정 =====
 PERIOD_MAX_DEFAULT = 4
@@ -135,6 +138,109 @@ def fmt_mmss_centi(s):
     r = int(s) % 60
     centi = int((s - int(s)) * 100)
     return f"{m:02d}:{r:02d}.{centi:02d}"
+
+def show_logo_selection_dialog(parent_window=None):
+    """팀 로고 선택 다이얼로그"""
+    # 기본 로고 URL 목록 (.env의 SUPABASE_URL 사용)
+    if SUPABASE_URL:
+        base_url = f"{SUPABASE_URL}/storage/v1/object/public/team-logo/default"
+    else:
+        base_url = "https://rnccawguqclhuzntkghd.supabase.co/storage/v1/object/public/team-logo/default"
+    
+    logo_options = [
+        {"name": "로고 없음", "url": None},
+        {"name": "기본 로고 1", "url": f"{base_url}/default_logo01.png"},
+        {"name": "기본 로고 2", "url": f"{base_url}/default_logo02.png"},
+        {"name": "기본 로고 3", "url": f"{base_url}/default_logo03.png"},
+        {"name": "기본 로고 4", "url": f"{base_url}/default_logo04.png"},
+    ]
+    
+    # 다이얼로그 생성
+    dialog = tk.Toplevel(parent_window) if parent_window else tk.Tk()
+    dialog.title("팀 로고 선택")
+    dialog.geometry("600x500")
+    dialog.configure(bg='#2a2a2a')
+    
+    if parent_window:
+        dialog.transient(parent_window)
+        dialog.grab_set()
+    
+    selected_logo = {'url': None, 'cancelled': False}
+    
+    tk.Label(dialog, text="팀 로고를 선택하세요", 
+            font=('Arial', 14, 'bold'), fg='white', bg='#2a2a2a').pack(pady=20)
+    
+    # 스크롤 가능한 프레임
+    canvas = tk.Canvas(dialog, bg='#2a2a2a', highlightthickness=0)
+    scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+    scrollable_frame = tk.Frame(canvas, bg='#2a2a2a')
+    
+    scrollable_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+    
+    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    
+    canvas.pack(side="left", fill="both", expand=True, padx=20, pady=(0, 20))
+    scrollbar.pack(side="right", fill="y", pady=(0, 20))
+    
+    def on_select(logo_url):
+        selected_logo['url'] = logo_url
+        selected_logo['cancelled'] = False
+        dialog.destroy()
+    
+    def on_cancel():
+        selected_logo['cancelled'] = True
+        dialog.destroy()
+    
+    # 로고 옵션 표시
+    for option in logo_options:
+        frame = tk.Frame(scrollable_frame, bg='#3a3a3a', relief=tk.RAISED, borderwidth=2)
+        frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # 이미지 로드 및 표시
+        if option['url']:
+            try:
+                response = requests.get(option['url'], timeout=3)
+                img_data = Image.open(BytesIO(response.content))
+                # 썸네일 크기로 조정 (150x150)
+                img_data.thumbnail((150, 150), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img_data)
+                
+                img_label = tk.Label(frame, image=photo, bg='#3a3a3a')
+                img_label.image = photo  # 참조 유지
+                img_label.pack(pady=10)
+            except Exception as e:
+                print(f"로고 로드 실패: {option['url']}, 오류: {e}")
+                tk.Label(frame, text="이미지 로드 실패", fg='red', bg='#3a3a3a').pack(pady=10)
+        else:
+            tk.Label(frame, text="(로고 없음)", fg='gray', bg='#3a3a3a', 
+                    font=('Arial', 12)).pack(pady=30)
+        
+        # 선택 버튼
+        tk.Button(frame, text=option['name'], 
+                 command=lambda url=option['url']: on_select(url),
+                 font=('Arial', 11), bg='#4CAF50', fg='black', width=15).pack(pady=10)
+    
+    # 취소 버튼
+    tk.Button(dialog, text="취소", command=on_cancel,
+             font=('Arial', 11), bg='#f44336', fg='black', width=15).pack(pady=10)
+    
+    # Toplevel 윈도우는 wait_window() 사용 (mainloop() 대신)
+    if parent_window:
+        dialog.wait_window()
+    else:
+        dialog.mainloop()
+    
+    # 취소한 경우 None 반환 (변경하지 않음을 의미)
+    if selected_logo['cancelled']:
+        return None
+    
+    # 선택한 URL 반환 ("로고 없음" 선택 시 빈 문자열, 로고 선택 시 URL 반환)
+    result_url = selected_logo['url']
+    return result_url if result_url else ""
 
 def show_game_selection_dialog():
     """게임 선택 다이얼로그 표시"""
@@ -523,12 +629,10 @@ class DualMonitorScoreboard:
             if self.last_score_data != score_data:
                 success = update_live_score_to_supabase(self.supabase_client, self.game_id, score_data)
                 if success:
-                    print(f"Supabase 업데이트 성공: {self.game_id}")
+                    # print(f"Supabase 업데이트 성공: {self.game_id}")  # 로그 최소화
                     self.last_score_data = score_data.copy()
                 else:
                     print(f"Supabase 업데이트 실패: {self.game_id}")
-            # else:
-            #     print(f"변경사항 없음, 업데이트 스킵: {self.game_id}")  # 디버깅용 (필요시 주석 해제)
         except Exception as e:
             print(f"Supabase 업데이트 중 오류: {e}")
     
@@ -745,6 +849,12 @@ class DualMonitorScoreboard:
         
         # 힌트
         self.create_hints(main_frame)
+        
+        # 창이 완전히 렌더링된 후 크기 업데이트
+        self.control_window.after(100, self.update_hints_text)
+        
+        # 창 크기 변경 시 힌트 텍스트 업데이트
+        self.control_window.bind('<Configure>', lambda e: self.update_hints_text())
     
     def create_control_buttons(self, parent):
         """조작 버튼들 생성"""
@@ -952,15 +1062,39 @@ class DualMonitorScoreboard:
                                    font=self.font_small, fg='gray', bg='#1a1a1a')
         hints_frame.pack(fill=tk.X, pady=(10, 0))
         
-        hints_text = """점수: 1/2/3(A팀 +1/+2/+3) | 0/9/8(B팀 +1/+2/+3) | `/-(A/B팀 -1)
+        # 초기 크기 (아직 정확하지 않을 수 있음)
+        self.hints_label = tk.Label(hints_frame, text="", 
+                              font=self.font_small, fg='gray', bg='#1a1a1a', justify=tk.LEFT)
+        self.hints_label.pack(anchor=tk.W)
+        
+        # 힌트 텍스트 업데이트 (크기 포함)
+        self.update_hints_text()
+    
+    def update_hints_text(self):
+        """힌트 텍스트 업데이트 (창 크기 포함)"""
+        if not hasattr(self, 'hints_label'):
+            return
+        
+        # 컨트롤 창 크기 가져오기
+        try:
+            width = self.control_window.winfo_width()
+            height = self.control_window.winfo_height()
+            size_text = f"화면 크기: {width} × {height}"
+            
+            # 윈도우 타이틀도 업데이트
+            broadcast_channel = self.get_broadcast_channel()
+            self.control_window.title(f"Novato Scoreboard - {broadcast_channel} | {width} × {height}")
+        except:
+            size_text = "화면 크기: 계산 중..."
+        
+        hints_text = f"""{size_text}
+점수: 1/2/3(A팀 +1/+2/+3) | 0/9/8(B팀 +1/+2/+3) | `/-(A/B팀 -1)
 게임시간: 스페이스(play/pause) | t(시간 리셋) | ←→(±1초) | ↑↓(±10초) | <>(±1분)
 샷클럭: s(play/pause) | a/z(±1초) | d(24초 리셋) | f(14초 리셋)
 홈팀(A): q/Q(타임아웃 -/+) | w/W(파울 +/-) | 원정팀(B): p/P(타임아웃 -/+) | o/O(파울 +/-)
 게임: R(전체 리셋) | [](쿼터 ±1) | F2(설정) | F3(게임 변경) | F4(모니터 전환) | Esc(종료 확인)"""
         
-        hints_label = tk.Label(hints_frame, text=hints_text, 
-                              font=self.font_small, fg='gray', bg='#1a1a1a', justify=tk.LEFT)
-        hints_label.pack(anchor=tk.W)
+        self.hints_label.config(text=hints_text)
     
     def create_presentation_window(self):
         """프레젠테이션용 전체화면 창 생성 (모니터 전환 기능 포함)"""
@@ -1599,8 +1733,9 @@ class DualMonitorScoreboard:
             tk.Label(team_a_frame, text=self.teamA_name, fg='lightblue', bg='#2a2a2a',
                     font=self.font_small).pack(pady=5)
         
-        # A팀 컬러
+        # A팀 컬러 및 로고
         team_a_color_var = None
+        team_a_logo_var = None
         colors = ["#F4F4F4", "#2563EB", "#EF4444", "#FACC15", "#222222", "#22C55E"]
         color_names = ["흰색", "파랑", "빨강", "노랑", "검정", "녹색"]
         color_map = dict(zip(colors, color_names))
@@ -1622,6 +1757,35 @@ class DualMonitorScoreboard:
             for i in range(3, 6):
                 tk.Radiobutton(color_row2, text=color_names[i], variable=team_a_color_var, 
                               value=colors[i], fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+            
+            # A팀 로고 설정
+            tk.Label(team_a_frame, text="팀 로고:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+            team_a_logo_var = tk.StringVar(value=getattr(self, 'team1_logo', None) or "")
+            
+            logo_display_frame = tk.Frame(team_a_frame, bg='#2a2a2a')
+            logo_display_frame.pack(pady=5)
+            
+            team_a_logo_label = tk.Label(logo_display_frame, 
+                                         text="로고 없음" if not team_a_logo_var.get() else "로고 설정됨",
+                                         fg='yellow', bg='#2a2a2a')
+            team_a_logo_label.pack(side=tk.LEFT, padx=5)
+            
+            def select_team_a_logo():
+                result = show_logo_selection_dialog(settings_window)
+                
+                # None이면 취소 (아무 것도 하지 않음)
+                if result is None:
+                    return
+                
+                # 선택됨 (빈 문자열 = 로고 없음, URL = 로고 있음)
+                team_a_logo_var.set(result)
+                
+                # UI 업데이트만 (실제 저장은 save_settings에서)
+                team_a_logo_label.config(text="로고 없음" if not result else "로고 설정됨")
+                print(f"A팀 로고 선택: {result if result else '(로고 없음)'}")
+            
+            tk.Button(logo_display_frame, text="로고 선택", command=select_team_a_logo,
+                     font=('Arial', 9), bg='#2196F3', fg='black').pack(side=tk.LEFT, padx=5)
         else:
             # 서버 게임: 읽기 전용으로 컬러 표시
             tk.Label(team_a_frame, text="팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
@@ -1649,8 +1813,9 @@ class DualMonitorScoreboard:
             tk.Label(team_b_frame, text=self.teamB_name, fg='lightcoral', bg='#2a2a2a',
                     font=self.font_small).pack(pady=5)
         
-        # B팀 컬러
+        # B팀 컬러 및 로고
         team_b_color_var = None
+        team_b_logo_var = None
         if self.is_quick_start:
             # 바로 시작: 라디오 버튼으로 선택 가능
             tk.Label(team_b_frame, text="팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
@@ -1668,6 +1833,35 @@ class DualMonitorScoreboard:
             for i in range(3, 6):
                 tk.Radiobutton(color_row2, text=color_names[i], variable=team_b_color_var, 
                               value=colors[i], fg='white', bg='#2a2a2a', selectcolor='#444444').pack(side=tk.LEFT, padx=5)
+            
+            # B팀 로고 설정
+            tk.Label(team_b_frame, text="팀 로고:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
+            team_b_logo_var = tk.StringVar(value=getattr(self, 'team2_logo', None) or "")
+            
+            logo_display_frame = tk.Frame(team_b_frame, bg='#2a2a2a')
+            logo_display_frame.pack(pady=5)
+            
+            team_b_logo_label = tk.Label(logo_display_frame, 
+                                         text="로고 없음" if not team_b_logo_var.get() else "로고 설정됨",
+                                         fg='yellow', bg='#2a2a2a')
+            team_b_logo_label.pack(side=tk.LEFT, padx=5)
+            
+            def select_team_b_logo():
+                result = show_logo_selection_dialog(settings_window)
+                
+                # None이면 취소 (아무 것도 하지 않음)
+                if result is None:
+                    return
+                
+                # 선택됨 (빈 문자열 = 로고 없음, URL = 로고 있음)
+                team_b_logo_var.set(result)
+                
+                # UI 업데이트만 (실제 저장은 save_settings에서)
+                team_b_logo_label.config(text="로고 없음" if not result else "로고 설정됨")
+                print(f"B팀 로고 선택: {result if result else '(로고 없음)'}")
+            
+            tk.Button(logo_display_frame, text="로고 선택", command=select_team_b_logo,
+                     font=('Arial', 9), bg='#2196F3', fg='black').pack(side=tk.LEFT, padx=5)
         else:
             # 서버 게임: 읽기 전용으로 컬러 표시
             tk.Label(team_b_frame, text="팀 컬러:", fg='white', bg='#2a2a2a').pack(pady=(10, 5))
@@ -1803,10 +1997,22 @@ class DualMonitorScoreboard:
             self.cfg["timeout_count"] = timeout_count_var.get()
             self.cfg["overtime_minutes"] = overtime_minutes_var.get()
             
-            # 팀 컬러는 바로 시작일 때만 저장
-            if self.is_quick_start and team_a_color_var and team_b_color_var:
-                self.cfg["team_a_color"] = team_a_color_var.get()
-                self.cfg["team_b_color"] = team_b_color_var.get()
+            # 팀 컬러와 로고는 바로 시작일 때만 저장
+            if self.is_quick_start:
+                if team_a_color_var and team_b_color_var:
+                    self.cfg["team_a_color"] = team_a_color_var.get()
+                    self.cfg["team_b_color"] = team_b_color_var.get()
+                
+                # 팀 로고 저장
+                if team_a_logo_var:
+                    logo_value = team_a_logo_var.get()
+                    self.team1_logo = None if logo_value == "" else logo_value
+                    print(f"저장: A팀 로고 = {self.team1_logo}")
+                
+                if team_b_logo_var:
+                    logo_value = team_b_logo_var.get()
+                    self.team2_logo = None if logo_value == "" else logo_value
+                    print(f"저장: B팀 로고 = {self.team2_logo}")
             
             # 설정에 따른 값 업데이트
             self.cfg["game_seconds"] = self.cfg["game_minutes"] * 60
@@ -1820,7 +2026,11 @@ class DualMonitorScoreboard:
             
             save_cfg(self.cfg)
             self.update_displays()
+            
+            # 설정 저장 시 Supabase 업데이트
+            print(f"설정 저장 완료 - 서버 업데이트 시작")
             self.update_supabase_data()
+            print(f"설정 저장 후 로고 상태: team1_logo={self.team1_logo}, team2_logo={self.team2_logo}")
             
             # 듀얼모니터 설정 변경시 창 재생성
             if self.cfg.get("dual_monitor", False):
