@@ -109,18 +109,16 @@ class GameDatabase:
                 division = game.get("division", "")
                 
                 # 게임 타입에 따른 상태 표시
-                if game_type == "result":
-                    status = "완료"
-                elif game_type == "live":
-                    status = "진행중"
+                if game_type == "scheduled":
+                    status = "(예정)"
                 else:
-                    status = "예정"
+                    status = ""
                 
                 # 디비전 정보 추가 (있는 경우)
                 division_info = f" [{division}]" if division else ""
                 
                 # 포맷팅된 문자열 생성
-                formatted = f"{date_str} {team1} vs {team2} ({status}){division_info}"
+                formatted = f"{date_str} {team1} vs {team2} {status}{division_info}"
                 formatted_games.append(formatted)
                 
             except Exception as e:
@@ -132,12 +130,22 @@ class GameDatabase:
     def make_display_items(self, games: List[Dict]) -> List[Dict]:
         """
         표시 문자열과 원본 게임 객체를 함께 반환하여 인덱스 불일치를 방지
+        정렬 순서:
+        1. 최상단: "바로 시작"
+        2. 오늘부터 미래의 경기 (오름차순)
+        3. 어제부터 과거의 경기 (내림차순)
         Returns: [{ 'text': str, 'game': Dict }]
         """
-        items: List[Dict] = []
-        texts = self.format_game_list(games)
-        # format_game_list가 실패할 수 있으므로 길이 불일치에 대비
-        # 안전하게 다시 포맷팅하여 1:1 매핑을 생성
+        # 1. "바로 시작" 항목 추가
+        items: List[Dict] = [{"text": "▶ 바로 시작", "game": None}]
+        
+        # 오늘 날짜 (자정 기준)
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        future_games = []  # 오늘 이후 (오늘 포함)
+        past_games = []    # 어제 이전
+        
+        # 2. 게임 데이터를 미래/과거로 분류
         for game in games:
             try:
                 game_date_str = game["game_date"]
@@ -145,23 +153,50 @@ class GameDatabase:
                     game_date = datetime.strptime(game_date_str, "%Y-%m-%d %H:%M")
                 else:
                     game_date = datetime.strptime(game_date_str, "%Y-%m-%d")
+                
+                # 날짜만으로 비교 (자정 기준)
+                game_date_only = game_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                
                 date_str = game_date.strftime("%m/%d")
                 team1 = game.get("team1", "팀1")
                 team2 = game.get("team2", "팀2")
                 game_type = game.get("game_type", "result")
                 division = game.get("division", "")
-                if game_type == "result":
-                    status = "완료"
-                elif game_type == "live":
-                    status = "진행중"
+                
+                if game_type == "scheduled":
+                    status = "(예정)"
                 else:
-                    status = "예정"
+                    status = ""
+                
                 division_info = f" [{division}]" if division else ""
-                text = f"{date_str} {team1} vs {team2} ({status}){division_info}"
-                items.append({"text": text, "game": game})
-            except Exception:
+                text = f"{date_str} {team1} vs {team2} {status}{division_info}"
+                
+                item = {"text": text, "game": game, "date": game_date}
+                
+                # 오늘 이후 vs 어제 이전 분류
+                if game_date_only >= today:
+                    future_games.append(item)
+                else:
+                    past_games.append(item)
+                    
+            except Exception as e:
                 # 문제 있는 항목은 건너뜀
+                print(f"게임 항목 처리 중 오류: {e}")
                 continue
+        
+        # 3. 미래 경기 오름차순 정렬 (날짜 빠른 순)
+        future_games.sort(key=lambda x: x["date"])
+        
+        # 4. 과거 경기 내림차순 정렬 (날짜 최근 순)
+        past_games.sort(key=lambda x: x["date"], reverse=True)
+        
+        # 5. 최종 조합: 바로시작 → 미래 경기 → 과거 경기
+        for item in future_games:
+            items.append({"text": item["text"], "game": item["game"]})
+        
+        for item in past_games:
+            items.append({"text": item["text"], "game": item["game"]})
+        
         return items
 
 # 전역 인스턴스

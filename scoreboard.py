@@ -288,10 +288,7 @@ def show_game_selection_dialog():
     listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar.config(command=listbox.yview)
     
-    # "바로시작" 추가
-    listbox.insert(0, "🎮 바로시작 (기본값)")
-    
-    # 게임 목록 추가
+    # 게임 목록 추가 (database.py에서 이미 "바로 시작"을 첫 번째로 추가함)
     for item in display_items:
         listbox.insert(tk.END, item['text'])
     
@@ -302,12 +299,8 @@ def show_game_selection_dialog():
         selection = listbox.curselection()
         if selection:
             idx = selection[0]
-            if idx == 0:
-                # 바로시작
-                selected_game['game'] = None
-            else:
-                # 게임 선택 (인덱스 조정)
-                selected_game['game'] = display_items[idx - 1]['game']
+            # display_items에서 직접 가져오기 (인덱스 조정 불필요)
+            selected_game['game'] = display_items[idx]['game']
         dialog.destroy()
     
     def on_cancel():
