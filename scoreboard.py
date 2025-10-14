@@ -242,7 +242,7 @@ def show_logo_selection_dialog(parent_window=None):
     result_url = selected_logo['url']
     return result_url if result_url else ""
 
-def show_game_selection_dialog():
+def show_game_selection_dialog(small_screen=False):
     """게임 선택 다이얼로그 표시"""
     db = get_database()
     if not db:
@@ -260,13 +260,19 @@ def show_game_selection_dialog():
     dialog = tk.Tk()
     dialog.title("게임 선택")
     
+    # 화면 크기 설정 (small_screen 모드 대응)
+    if small_screen:
+        dialog_w, dialog_h = 600, 400  # 높이를 400으로 제한
+    else:
+        dialog_w, dialog_h = 600, 500
+    
     # 컨트롤 패널과 같은 위치에 표시
     if swap_monitors:
         # 전환 모드: 두 번째 모니터
-        dialog.geometry("600x500+1920+100")
+        dialog.geometry(f"{dialog_w}x{dialog_h}+1920+100")
     else:
         # 기본 모드: 첫 번째 모니터
-        dialog.geometry("600x500+100+100")
+        dialog.geometry(f"{dialog_w}x{dialog_h}+100+100")
     
     dialog.configure(bg='#1a1a1a')
     
@@ -412,7 +418,7 @@ class DualMonitorScoreboard:
         self.supabase_client = init_supabase_client()
         self.game_id = self.cfg.get("game_id", "novato-scoreboard")  # 설정에서 게임 ID 가져오기
         print(f"게임 방송 채널: {self.get_broadcast_channel()}")
-        print(f"화면 모드: {'작은 화면 (800x480)' if small_screen else '일반 화면'}")
+        print(f"화면 모드: {'작은 화면 (726x416)' if small_screen else '일반 화면'}")
         
         # 게임 유형 저장 (서버 게임 vs 바로 시작)
         self.is_quick_start = (selected_game is None)
@@ -656,7 +662,7 @@ class DualMonitorScoreboard:
         font_ratio = min(width_ratio, height_ratio)
         
         if self.small_screen:
-            # 작은 화면 모드 (800x480): 창 크기는 그대로, 폰트만 1.2배 증가
+            # 작은 화면 모드 (726x416): 창 크기는 그대로, 폰트만 1.2배 증가
             self.font_large = font.Font(family="Arial", size=19, weight="bold")  # 16 * 1.2
             self.font_medium = font.Font(family="Arial", size=12)  # 10 * 1.2
             self.font_small = font.Font(family="Arial", size=10)  # 8 * 1.2 (반올림)
@@ -684,9 +690,9 @@ class DualMonitorScoreboard:
         self.control_window.title(f"Novato Scoreboard - {self.get_broadcast_channel()}")
         
         if self.small_screen:
-            # 작은 화면 모드: 800x480 고정 (내용물만 1.2배)
-            control_width = 800
-            control_height = 480
+            # 작은 화면 모드: 726x416 고정 (내용물만 1.2배)
+            control_width = 726
+            control_height = 416
             self.control_window.resizable(False, False)  # 크기 고정
             # 작은 화면은 해당 모니터의 좌측 상단에 고정
             if self.cfg.get("swap_monitors", False):
@@ -1726,7 +1732,13 @@ class DualMonitorScoreboard:
         """설정 창 표시 (개선된 레이아웃)"""
         settings_window = tk.Toplevel(self.root)
         settings_window.title("게임 설정")
-        settings_window.geometry("700x650")
+        
+        # small_screen 모드일 때 높이 조정
+        if self.small_screen:
+            settings_window.geometry("700x400")
+        else:
+            settings_window.geometry("700x650")
+        
         settings_window.configure(bg='#2a2a2a')
         settings_window.resizable(True, True)
         
@@ -2170,7 +2182,7 @@ def main():
     parser.add_argument("--game", type=int, help="게임 시간 (초)")
     parser.add_argument("--shot", type=int, help="샷 클럭 시간 (초)")
     parser.add_argument("--periods", type=int, help="최대 쿼터 수")
-    parser.add_argument("--small-screen", action="store_true", help="작은 화면 모드 (800x480)")
+    parser.add_argument("--small-screen", action="store_true", help="작은 화면 모드 (726x416)")
     args = parser.parse_args()
     
     # 설정 로드 및 명령행 인수 적용
@@ -2182,8 +2194,8 @@ def main():
     if args.periods: cfg["period_max"] = max(1, int(args.periods))
     save_cfg(cfg)
     
-    # 게임 선택 다이얼로그 표시
-    selected_game = show_game_selection_dialog()
+    # 게임 선택 다이얼로그 표시 (작은 화면 모드 전달)
+    selected_game = show_game_selection_dialog(small_screen=args.small_screen)
     
     # 스코어보드 실행 (작은 화면 모드 전달)
     app = DualMonitorScoreboard(selected_game, small_screen=args.small_screen)
