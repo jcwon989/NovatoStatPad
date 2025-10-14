@@ -132,12 +132,13 @@ def fmt_mmss(s):
     return f"{m:02d}:{r:02d}"
 
 def fmt_mmss_centi(s):
-    """1/100초까지 표시하는 시간 포맷"""
+    """1/5초까지 표시하는 시간 포맷 (0.0, 0.2, 0.4, 0.6, 0.8)"""
     s = max(0, s)
     m = int(s) // 60
     r = int(s) % 60
-    centi = int((s - int(s)) * 100)
-    return f"{m:02d}:{r:02d}.{centi:02d}"
+    # 1/5초 단위로 변환 (5분의 1 = 0.2초)
+    fifth = int((s - int(s)) * 5) * 2  # 0, 2, 4, 6, 8
+    return f"{m:02d}:{r:02d}.{fifth:01d}"
 
 def show_logo_selection_dialog(parent_window=None):
     """팀 로고 선택 다이얼로그"""
@@ -679,7 +680,8 @@ class DualMonitorScoreboard:
         # 프레젠테이션용 폰트 (항상 큰 화면용, small_screen과 무관)
         self.pres_font_team = font.Font(family="Arial", size=int(90 * font_ratio), weight="bold")  # 120 → 90
         self.pres_font_score = font.Font(family="Arial", size=int(300 * font_ratio), weight="bold")  # 400 → 300
-        self.pres_font_time = font.Font(family="Arial", size=int(120 * font_ratio), weight="bold")  # 160 → 120
+        self.pres_font_time = font.Font(family="Arial", size=int(120 * font_ratio), weight="bold")  # 160 → 120 (분:초용)
+        self.pres_font_time_small = font.Font(family="Arial", size=int(90 * font_ratio), weight="bold")  # 120 * 0.75 = 90 (1/5초용)
         self.pres_font_shot = font.Font(family="Arial", size=int(150 * font_ratio), weight="bold")  # 200 → 150
         self.pres_font_period = font.Font(family="Arial", size=int(90 * font_ratio), weight="bold")  # 120 → 90
         self.pres_font_stats = font.Font(family="Arial", size=int(60 * font_ratio), weight="bold")  # 80 → 60
@@ -1328,11 +1330,25 @@ class DualMonitorScoreboard:
         time_frame = tk.Frame(parent, bg='#111111')
         time_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 게임 시간
-        self.pres_time_label = tk.Label(time_frame, text=fmt_mmss_centi(self.game_seconds), 
+        # 게임 시간 (분:초와 1/5초를 분리하여 표시)
+        time_container = tk.Frame(time_frame, bg='#111111')
+        time_container.pack(pady=(100, 20))
+        
+        # 분:초 부분 (큰 글자)
+        s = max(0, self.game_seconds)
+        m = int(s) // 60
+        r = int(s) % 60
+        self.pres_time_mmss = tk.Label(time_container, text=f"{m:02d}:{r:02d}", 
                                        font=self.pres_font_time, 
                                        fg='yellow', bg='#111111')
-        self.pres_time_label.pack(pady=(100, 20))
+        self.pres_time_mmss.pack(side=tk.LEFT, anchor='s')
+        
+        # 1/5초 부분 (75% 크기, 아래 라인 맞춤)
+        fifth = int((s - int(s)) * 5) * 2
+        self.pres_time_fifth = tk.Label(time_container, text=f".{fifth:01d}", 
+                                        font=self.pres_font_time_small, 
+                                        fg='yellow', bg='#111111')
+        self.pres_time_fifth.pack(side=tk.LEFT, anchor='s')
         
         # 쿼터
         self.pres_period_label = tk.Label(time_frame, text=f'Q{self.period}', 
@@ -1662,15 +1678,24 @@ class DualMonitorScoreboard:
                 self.pres_foul_a_label.config(text=str(self.foulsA))
                 self.pres_foul_b_label.config(text=str(self.foulsB))
             
-            self.pres_time_label.config(text=fmt_mmss_centi(self.game_seconds))
+            # 시간 업데이트 (분:초와 1/5초 분리)
+            s = max(0, self.game_seconds)
+            m = int(s) // 60
+            r = int(s) % 60
+            fifth = int((s - int(s)) * 5) * 2
+            self.pres_time_mmss.config(text=f"{m:02d}:{r:02d}")
+            self.pres_time_fifth.config(text=f".{fifth:01d}")
+            
             self.pres_period_label.config(text=f"Q{self.period}")
             self.pres_shot_label.config(text=str(int(self.shot_seconds)))
             
             # 마지막 10초부터 빨간색
             if self.game_seconds <= 10:
-                self.pres_time_label.config(fg='red')
+                self.pres_time_mmss.config(fg='red')
+                self.pres_time_fifth.config(fg='red')
             else:
-                self.pres_time_label.config(fg='yellow')
+                self.pres_time_mmss.config(fg='yellow')
+                self.pres_time_fifth.config(fg='yellow')
             
             # 마지막 5초부터 샷클럭 빨간색
             if self.shot_seconds <= 5:
